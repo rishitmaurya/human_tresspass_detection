@@ -11,6 +11,15 @@ class CameraWidget(QWidget):
     def __init__(self):
         super().__init__()
         
+        self.cap = None
+        self.timer = QTimer()
+        
+        self.roi = None  # ROI will be set by user
+        self.drawing = False
+        self.allow_drawing = False
+        self.start_point = None
+        self.end_point = None
+        
         self.video_label = QLabel("Video Feed")
         self.video_label.setFixedSize(950, 600)
         self.video_label.setStyleSheet("background-color: black;")
@@ -21,13 +30,9 @@ class CameraWidget(QWidget):
         layout.addWidget(self.video_label)
         self.setLayout(layout)
         
-        self.cap = None
-        self.timer = QTimer()
         self.timer.timeout.connect(self.update_frame)
-        self.roi = None  # ROI will be set by user
-        self.drawing = False
-        self.start_point = None
-        self.end_point = None
+        
+        
 
     def start(self):
         self.cap = cv2.VideoCapture(0)
@@ -42,9 +47,15 @@ class CameraWidget(QWidget):
             self.cap.release()
             self.cap = None
             self.clear()
+            
+    def enable_drawing(self):
+        self.allow_drawing = True
 
     def eventFilter(self, source, event):
         if source is self.video_label:
+            if not self.allow_drawing:
+                return super().eventFilter(source, event)
+                
             if event.type() == event.MouseButtonPress and event.button() == Qt.LeftButton:
                 self.drawing = True
                 self.start_point = event.pos()
@@ -56,6 +67,7 @@ class CameraWidget(QWidget):
                 x1, y1 = self.start_point.x(), self.start_point.y()
                 x2, y2 = self.end_point.x(), self.end_point.y()
                 self.roi = [(min(x1, x2), min(y1, y2)), (max(x1, x2), max(y1, y2))]
+                self.allow_drawing = False  
         return super().eventFilter(source, event)
 
     def update_frame(self):

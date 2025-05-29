@@ -10,11 +10,13 @@ class MainApp(QMainWindow):
         self.setGeometry(100, 100, 1000, 700)
 
         self.camera_widget = CameraWidget()
+        self.draw_menu = None
+        self.menubar = self.menuBar()
 
         start_button = QPushButton("Start Detection")
         stop_button = QPushButton("Stop Detection")
 
-        start_button.clicked.connect(self.camera_widget.start)
+        start_button.clicked.connect(self.on_start_detection)
         stop_button.clicked.connect(self.camera_widget.stop)
 
         layout = QVBoxLayout()
@@ -29,21 +31,31 @@ class MainApp(QMainWindow):
         self.create_menu()
 
     def create_menu(self):
-        menubar = self.menuBar()
 
         # File menu
-        file_menu = menubar.addMenu("File")
+        file_menu = self.menubar.addMenu("File")
 
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
         # Help menu
-        help_menu = menubar.addMenu("Help")
+        help_menu = self.menubar.addMenu("Help")
 
         about_action = QAction("About", self)
         about_action.triggered.connect(self.show_about_dialog)
         help_menu.addAction(about_action)
+        
+    def add_draw_menu(self):
+        if not self.draw_menu:
+            self.draw_menu = self.menubar.addMenu("Draw")
+            draw_action = QAction("Draw ROI", self)
+            draw_action.triggered.connect(self.camera_widget.enable_drawing)
+            self.draw_menu.addAction(draw_action)
+
+    def on_start_detection(self):
+        self.camera_widget.start()
+        self.add_draw_menu()
 
     def show_about_dialog(self):
         QMessageBox.information(
