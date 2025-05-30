@@ -121,7 +121,6 @@ class MainApp(QMainWindow):
             zip_name = f"intrusion_data_{timestamp}.zip"
             
             with tempfile.TemporaryDirectory() as temp_dir:
-                # Create a folder for the export
                 export_dir = os.path.join(temp_dir, "intrusion_data")
                 os.makedirs(export_dir)
                 
@@ -135,10 +134,30 @@ class MainApp(QMainWindow):
                     
                     with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
                         writer = csv.writer(csvfile)
-                        for row in table.find_all('tr'):
-                            cols = row.find_all(['th', 'td'])
-                            writer.writerow([col.text.strip() for col in cols[:-1]])  # Skip image column
-                
+                        
+                        # Write header
+                        header_row = table.find('tr')
+                        headers = [th.text.strip() for th in header_row.find_all('th')]
+                        headers[-1] = 'Image File'  # Change last header from 'Evidence' to 'Image File'
+                        writer.writerow(headers)
+                        
+                        # Write data rows
+                        for row in table.find_all('tr')[1:]:  # Skip header row
+                            cols = row.find_all('td')
+                            if cols:  # If row has data
+                                # Get text from first 4 columns
+                                row_data = [col.text.strip() for col in cols[:-1]]
+                                
+                                # Get image filename from the img tag if it exists
+                                img_tag = cols[-1].find('img')
+                                if img_tag and 'src' in img_tag.attrs:
+                                    img_filename = os.path.basename(img_tag['src'])
+                                    row_data.append(img_filename)
+                                else:
+                                    row_data.append('No image')
+                                    
+                                writer.writerow(row_data)
+                    
                 # Copy images
                 images_export_dir = os.path.join(export_dir, "images")
                 if os.path.exists(images_dir):
@@ -163,7 +182,7 @@ class MainApp(QMainWindow):
                         "Success", 
                         "Intrusion data downloaded successfully!\n\n"
                         "The ZIP file contains:\n"
-                        "- CSV file with intrusion data\n"
+                        "- CSV file with intrusion data including image references\n"
                         "- Folder with captured images"
                     )
 
