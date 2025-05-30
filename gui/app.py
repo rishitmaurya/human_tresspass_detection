@@ -4,8 +4,19 @@ from gui.camera_widget import CameraWidget
 from PyQt5.QtCore import Qt, QUrl
 import os
 from utils.logger import IMAGES_DIR
-from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
 
+class CustomWebPage(QWebEnginePage):
+    def __init__(self, parent, main_window):
+        super().__init__(parent)
+        self.main_window = main_window
+
+    def acceptNavigationRequest(self, url, _type, isMainFrame):
+        if url.scheme() == 'download':
+            self.main_window.download_data(IMAGES_DIR)
+            return False
+        return super().acceptNavigationRequest(url, _type, isMainFrame)
+    
 class MainApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -74,72 +85,68 @@ class MainApp(QMainWindow):
                 self.log_window.setWindowTitle("Intruders Log")
                 self.log_window.setGeometry(200, 200, 800, 600)
 
-                # Create web view to display HTML
+                # Create web view with custom page
                 web_view = QWebEngineView()
+                custom_page = CustomWebPage(web_view, self)  # Pass self (MainApp instance)
+                web_view.setPage(custom_page)
                 web_view.setUrl(QUrl.fromLocalFile(os.path.abspath(log_path)))
 
-                # Add download button
-                download_button = QPushButton("Download Images")
-                download_button.clicked.connect(lambda: self.download_images(IMAGES_DIR))
-
-                # Add to layout
                 layout = QVBoxLayout()
                 layout.addWidget(web_view)
-                layout.addWidget(download_button)
                 self.log_window.setLayout(layout)
                 self.log_window.show()
             else:
                 QMessageBox.information(self, "Intruders Log", "No intrusions detected yet.")
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not open log: {str(e)}")
+            
+    def handle_url_change(self, url):
+        if url.toString().startswith('download://'):
+            self.download_data(IMAGES_DIR)
+            
+    def handle_download(self, download):
+        """Handle downloads from the WebEngine"""
+        download.accept()
 
-    def download_images(self, images_dir):
+    def download_data(self, images_dir):
         """Downloads all intrusion data including CSV and images"""
         try:
             import shutil
             import tempfile
             import csv
             from datetime import datetime
-
+            from bs4 import BeautifulSoup
+            
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             zip_name = f"intrusion_data_{timestamp}.zip"
             
             with tempfile.TemporaryDirectory() as temp_dir:
-                # Create CSV file with image references
-                csv_path = os.path.join(temp_dir, "intrusion_log.csv")
-                with open(csv_path, 'w', newline='') as csvfile:
-                    writer = csv.writer(csvfile)
-                    writer.writerow(["S.No", "Date", "Time", "Event", "Image File"])
-                    
-                    # Get data from HTML table
-                    from bs4 import BeautifulSoup
-                    with open(os.path.join("logs", "alert_log.html"), 'r', encoding='utf-8') as f:
-                        soup = BeautifulSoup(f.read(), 'html.parser')
-                        rows = soup.find_all('tr')[1:]  # Skip header row
-                        
-                        for row in rows:
-                            cols = row.find_all('td')
-                            if len(cols) >= 5:
-                                sno = cols[0].text.strip()
-                                date = cols[1].text.strip()
-                                time = cols[2].text.strip()
-                                event = cols[3].text.strip()
-                                img_tag = cols[4].find('img')
-                                img_file = img_tag['src'].split('/')[-1] if img_tag else "No image"
-                                writer.writerow([sno, date, time, event, img_file])
-                
                 # Create a folder for the export
                 export_dir = os.path.join(temp_dir, "intrusion_data")
                 os.makedirs(export_dir)
                 
-                # Copy CSV and create images folder
-                shutil.copy2(csv_path, export_dir)
+                # Create CSV from HTML table
+                log_path = os.path.join("logs", "alert_log.html")
+                csv_path = os.path.join(export_dir, "intrusion_log.csv")
+                
+                with open(log_path, 'r', encoding='utf-8') as f:
+                    soup = BeautifulSoup(f.read(), 'html.parser')
+                    table = soup.find('table')
+                    
+                    with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+                        writer = csv.writer(csvfile)
+                        for row in table.find_all('tr'):
+                            cols = row.find_all(['th', 'td'])
+                            writer.writerow([col.text.strip() for col in cols[:-1]])  # Skip image column
+                
+                # Copy images
                 images_export_dir = os.path.join(export_dir, "images")
-                shutil.copytree(images_dir, images_export_dir)
+                if os.path.exists(images_dir):
+                    shutil.copytree(images_dir, images_export_dir)
                 
                 # Create zip file
                 zip_path = os.path.join(temp_dir, zip_name)
-                shutil.make_archive(zip_path[:-4], 'zip', temp_dir, "intrusion_data")
+                shutil.make_archive(zip_path[:-4], 'zip', export_dir)
                 
                 # Show save file dialog
                 save_path, _ = QFileDialog.getSaveFileName(
@@ -156,8 +163,8 @@ class MainApp(QMainWindow):
                         "Success", 
                         "Intrusion data downloaded successfully!\n\n"
                         "The ZIP file contains:\n"
-                        "- CSV file with all intrusion data\n"
-                        "- Folder with all captured images"
+                        "- CSV file with intrusion data\n"
+                        "- Folder with captured images"
                     )
 
         except Exception as e:
