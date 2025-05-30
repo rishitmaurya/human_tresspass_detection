@@ -132,9 +132,24 @@ def log_event(event, frame=None):
                         cursor: pointer;
                         font-size: 0.9rem;
                         margin: 1rem;
-                        transition: background 0.2s;
+                        
                     }
-                    
+                    .alert {
+                        position: fixed;
+                        top: 20px;
+                        right: 20px;
+                        padding: 15px 20px;
+                        background: #4CAF50;
+                        color: white;
+                        border-radius: 4px;
+                        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+                        display: none;
+                        animation: slideIn 0.3s ease;
+                    }
+                    @keyframes slideIn {
+                        from { transform: translateX(100%); }
+                        to { transform: translateX(0); }
+                    }
                     @media (max-width: 768px) {
                         body { padding: 1rem; }
                         .header { padding: 1rem; }
@@ -145,6 +160,7 @@ def log_event(event, frame=None):
             </head>
             
             <body>
+                <div class="alert" id="successAlert">CSV Downloaded Successfully!</div>
                 <div class="container">
                     <div class="header">
                         <h2>Intrusion Detection Log</h2>
@@ -152,6 +168,14 @@ def log_event(event, frame=None):
                         <button class="download-btn" onclick="exportTableToCSV()">Download CSV</button>
                     </div>
                     <script>
+                    function showAlert() {
+                        const alert = document.getElementById('successAlert');
+                        alert.style.display = 'block';
+                        setTimeout(() => {
+                            alert.style.display = 'none';
+                        }, 3000);
+                    }
+                    
                     function exportTableToCSV() {
                         var csv = [];
                         var rows = document.querySelectorAll("table tr");
@@ -172,6 +196,7 @@ def log_event(event, frame=None):
                         link.setAttribute("download", "intrusion_log.csv");
                         document.body.appendChild(link);
                         link.click();
+                        showAlert();
                     }
                     </script>
                     <table>
