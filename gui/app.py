@@ -1,5 +1,6 @@
 # app.py
-from PyQt5.QtWidgets import QMainWindow, QPushButton, QVBoxLayout, QWidget, QLabel, QAction, QMenuBar, QMessageBox, QFileDialog
+from PyQt5.QtWidgets import (QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout, 
+                            QWidget, QLabel, QAction, QMenuBar, QMessageBox, QFileDialog)
 from gui.camera_widget import CameraWidget
 from PyQt5.QtCore import Qt, QUrl
 import os
@@ -23,20 +24,88 @@ class MainApp(QMainWindow):
         self.setWindowTitle("Human Trespass Detection System")
         self.setGeometry(100, 100, 1000, 700)
 
+        self.setStyleSheet("""
+        QMainWindow {
+            background-color: #f0f2f5;
+        }
+        QPushButton {
+            background-color: #1a237e;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-size: 14px;
+            min-width: 120px;
+            margin: 5px;
+        }
+        QPushButton:hover {
+            background-color: #283593;
+        }
+        QPushButton:pressed {
+            background-color: #0d1c73;
+        }
+        QPushButton#stopButton {
+            background-color: #c62828;
+        }
+        QPushButton#stopButton:hover {
+            background-color: #d32f2f;
+        }
+        """)
+
         self.camera_widget = CameraWidget()
         self.draw_menu = None
         self.menubar = self.menuBar()
+        self.menubar.setStyleSheet("""
+            QMenuBar {
+                background-color: #1a237e;
+                color: white;
+                padding: 2px;
+            }
+            QMenuBar::item {
+                padding: 8px 12px;
+                margin: 0px;
+            }
+            QMenuBar::item:selected {
+                background-color: #283593;
+            }
+            QMenu {
+                background-color: white;
+                border: 1px solid #ddd;
+            }
+            QMenu::item {
+                padding: 6px 20px;
+            }
+            QMenu::item:selected {
+                background-color: #e8eaf6;
+                color: #1a237e;
+            }
+        """)
 
-        start_button = QPushButton("Start Detection")
-        stop_button = QPushButton("Stop Detection")
+        # Create buttons with improved layout
+        button_container = QWidget()
+        button_layout = QHBoxLayout()
+        button_layout.setContentsMargins(20, 10, 20, 20)
+        button_layout.setSpacing(10)
+
+        start_button = QPushButton("▶ Start Detection")
+        stop_button = QPushButton("⏹ Stop Detection")
+        stop_button.setObjectName("stopButton")
+
+        button_layout.addStretch()
+        button_layout.addWidget(start_button)
+        button_layout.addWidget(stop_button)
+        button_layout.addStretch()
+        button_container.setLayout(button_layout)
 
         start_button.clicked.connect(self.on_start_detection)
         stop_button.clicked.connect(self.camera_widget.stop)
 
+        # Main layout with margins
         layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
         layout.addWidget(self.camera_widget)
-        layout.addWidget(start_button)
-        layout.addWidget(stop_button)
+        layout.addWidget(button_container)
 
         container = QWidget()
         container.setLayout(layout)
@@ -83,15 +152,22 @@ class MainApp(QMainWindow):
             if os.path.exists(log_path):
                 self.log_window = QWidget()
                 self.log_window.setWindowTitle("Intruders Log")
-                self.log_window.setGeometry(200, 200, 800, 600)
+                self.log_window.setGeometry(200, 200, 1000, 700)
+                self.log_window.setStyleSheet("""
+                    QWidget {
+                        background-color: #f0f2f5;
+                    }
+                """)
 
                 # Create web view with custom page
                 web_view = QWebEngineView()
-                custom_page = CustomWebPage(web_view, self)  # Pass self (MainApp instance)
+                custom_page = CustomWebPage(web_view, self)
                 web_view.setPage(custom_page)
                 web_view.setUrl(QUrl.fromLocalFile(os.path.abspath(log_path)))
 
+                # Add padding around the web view
                 layout = QVBoxLayout()
+                layout.setContentsMargins(20, 20, 20, 20)
                 layout.addWidget(web_view)
                 self.log_window.setLayout(layout)
                 self.log_window.show()
