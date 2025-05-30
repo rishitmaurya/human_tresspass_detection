@@ -6,6 +6,7 @@ from PyQt5.QtCore import QTimer, Qt, QPoint
 from detectors.yolo_detector import detect_humans
 from utils.geometry import is_inside_roi
 from utils.alert import trigger_alert
+from utils.logger import log_event
 
 class CameraWidget(QWidget):
     def __init__(self):
@@ -87,6 +88,7 @@ class CameraWidget(QWidget):
 
                 if self.roi and is_inside_roi((cx, cy), self.roi):
                     trigger_alert()
+                    log_event("Intrusion Detected", frame)
                     cv2.putText(frame, "INTRUDER!", (x1, y1 - 10),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
 
