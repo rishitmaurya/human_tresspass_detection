@@ -38,6 +38,12 @@ class MainApp(QMainWindow):
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+        
+        # View menu
+        view_menu = self.menubar.addMenu("View")
+        log_action = QAction("Intruders Log", self)
+        log_action.triggered.connect(self.show_intruders_log)
+        view_menu.addAction(log_action)
 
         # Help menu
         help_menu = self.menubar.addMenu("Help")
@@ -56,6 +62,22 @@ class MainApp(QMainWindow):
     def on_start_detection(self):
         self.camera_widget.start()
         self.add_draw_menu()
+        
+    def show_intruders_log(self):
+        try:
+            with open("logs/alert_log.txt", "r") as f:
+                log_content = f.read()
+            QMessageBox.information(
+                self,
+                "Intruders Log",
+                log_content if log_content else "No intrusions detected yet."
+            )
+        except FileNotFoundError:
+            QMessageBox.information(
+                self,
+                "Intruders Log",
+                "No log file found."
+            )
 
     def show_about_dialog(self):
         QMessageBox.information(
