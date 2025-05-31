@@ -20,6 +20,7 @@ class CameraWidget(QWidget):
         self.allow_drawing = False
         self.start_point = None
         self.end_point = None
+        self.detection_enabled = False
         
         self.video_label = QLabel("Video Feed")
         self.video_label.setSizePolicy(
@@ -50,14 +51,15 @@ class CameraWidget(QWidget):
         if not self.cap.isOpened():
             print("Error: Could not open video capture.")
             return
+        self.detection_enabled = True
         self.timer.start(30)
 
     def stop(self):
         if self.cap:
-            self.timer.stop()
-            self.cap.release()
-            self.cap = None
-            self.clear()
+            self.detection_enabled = False
+            self.roi = None  
+            self.drawing = False
+            self.allow_drawing = False
             
     def enable_drawing(self):
         self.allow_drawing = True
@@ -119,24 +121,25 @@ class CameraWidget(QWidget):
             frame = cv2.resize(frame, (new_width, new_height))
 
             # Detection
-            humans = detect_humans(frame)
-            for person in humans:
-                x1, y1, x2, y2 = person["box"]
-                cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+            if self.detection_enabled:
+                humans = detect_humans(frame)
+                for person in humans:
+                    x1, y1, x2, y2 = person["box"]
+                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
 
-                if self.roi and is_inside_roi((cx, cy), self.roi):
-                    trigger_alert()
-                    log_event("Intrusion Detected", frame)
-                    cv2.putText(frame, "INTRUDER!", (x1, y1 - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+                    if self.roi and is_inside_roi((cx, cy), self.roi):
+                        trigger_alert()
+                        log_event("Intrusion Detected", frame)
+                        cv2.putText(frame, "INTRUDER!", (x1, y1 - 10),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
 
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
 
-            # Draw ROI (either user-drawn or currently drawing)
-            if self.roi:
-                cv2.rectangle(frame, self.roi[0], self.roi[1], (0, 255, 0), 2)
-            elif self.drawing and self.start_point and self.end_point:
-                cv2.rectangle(frame, self.start_point, self.end_point, (0, 255, 255), 2)
+                # Draw ROI only when detection is enabled
+                if self.roi:
+                    cv2.rectangle(frame, self.roi[0], self.roi[1], (0, 255, 0), 2)
+                elif self.drawing and self.start_point and self.end_point:
+                    cv2.rectangle(frame, self.start_point, self.end_point, (0, 255, 255), 2)
 
             # Convert to RGB and create QPixmap
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
