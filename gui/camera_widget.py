@@ -7,6 +7,8 @@ from detectors.yolo_detector import detect_humans
 from utils.geometry import is_inside_roi
 from utils.alert import trigger_alert
 from utils.logger import log_event
+from PyQt5 import QtCore
+from time import time
 
 class CameraWidget(QWidget):
     def __init__(self):
@@ -21,6 +23,7 @@ class CameraWidget(QWidget):
         self.start_point = None
         self.end_point = None
         self.detection_enabled = False
+        self.last_alert_time = 0
         
         self.video_label = QLabel("Video Feed")
         self.video_label.setSizePolicy(
@@ -123,19 +126,32 @@ class CameraWidget(QWidget):
             # Detection
             if self.detection_enabled:
                 humans = detect_humans(frame)
+                current_time = time()
                 for person in humans:
                     x1, y1, x2, y2 = person["box"]
                     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
 
                     if self.roi and is_inside_roi((cx, cy), self.roi):
-                        trigger_alert()
-                        log_event("Intrusion Detected", frame)
+                        # Check if 1 second has passed since last alert
+                        if current_time - self.last_alert_time >= 1.0:
+                            # Create a copy of the frame for logging
+                            log_frame = frame.copy()
+                            
+                            # Handle alert in non-blocking way
+                            QtCore.QTimer.singleShot(0, lambda: trigger_alert())
+                            QtCore.QTimer.singleShot(0, lambda f=log_frame: log_event("Intrusion Detected", f))
+                            
+                            # Update last alert time
+                            self.last_alert_time = current_time
+                        
+                        # Add visual indicator on display frame
                         cv2.putText(frame, "INTRUDER!", (x1, y1 - 10),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
 
+                    # Always draw bounding box
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
 
-                # Draw ROI only when detection is enabled
+                # Draw ROI
                 if self.roi:
                     cv2.rectangle(frame, self.roi[0], self.roi[1], (0, 255, 0), 2)
                 elif self.drawing and self.start_point and self.end_point:
@@ -155,6 +171,6 @@ class CameraWidget(QWidget):
                 Qt.SmoothTransformation
             )
             
-            # Center the pixmap in the label
+            # Update the display
             self.video_label.setAlignment(Qt.AlignCenter)
             self.video_label.setPixmap(scaled_pixmap)
