@@ -1,6 +1,6 @@
 # app.py
 from PyQt5.QtWidgets import (QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout, 
-                            QWidget, QLabel, QAction, QMenuBar, QMessageBox, QFileDialog)
+                            QWidget, QLabel, QSizePolicy, QAction, QMenuBar, QMessageBox, QFileDialog)
 from gui.camera_widget import CameraWidget
 from PyQt5.QtCore import Qt, QUrl
 import os
@@ -22,7 +22,8 @@ class MainApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Human Trespass Detection System")
-        self.setGeometry(100, 100, 1000, 700)
+        self.setMinimumSize(800, 600)
+        self.resize(1000, 700)
 
         self.setStyleSheet("""
         QMainWindow {
@@ -53,6 +54,12 @@ class MainApp(QMainWindow):
         """)
 
         self.camera_widget = CameraWidget()
+        self.camera_widget.setSizePolicy(
+            QSizePolicy.Expanding, 
+            QSizePolicy.Expanding
+        )
+        self.camera_widget.setMinimumSize(640, 480)
+        
         self.draw_menu = None
         self.menubar = self.menuBar()
         self.menubar.setStyleSheet("""
@@ -83,6 +90,10 @@ class MainApp(QMainWindow):
 
         # Create buttons with improved layout
         button_container = QWidget()
+        button_container.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Fixed
+        )
         button_layout = QHBoxLayout()
         button_layout.setContentsMargins(20, 10, 20, 20)
         button_layout.setSpacing(10)
@@ -90,6 +101,12 @@ class MainApp(QMainWindow):
         start_button = QPushButton("▶ Start Detection")
         stop_button = QPushButton("⏹ Stop Detection")
         stop_button.setObjectName("stopButton")
+        
+        for button in (start_button, stop_button):
+            button.setSizePolicy(
+                QSizePolicy.Minimum,
+                QSizePolicy.Fixed
+            )
 
         button_layout.addStretch()
         button_layout.addWidget(start_button)
@@ -104,7 +121,7 @@ class MainApp(QMainWindow):
         layout = QVBoxLayout()
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
-        layout.addWidget(self.camera_widget)
+        layout.addWidget(self.camera_widget, stretch=1)
         layout.addWidget(button_container)
 
         container = QWidget()
@@ -269,5 +286,5 @@ class MainApp(QMainWindow):
         QMessageBox.information(
             self,
             "About",
-            "Human Trespass Detection System\nDeveloped using PyQt5, OpenCV, and YOLOv8."
+            "Human Trespass Detection System\nDeveloped by \n \t - Rishit Maurya"
         )
