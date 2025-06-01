@@ -9,6 +9,7 @@ from utils.alert import trigger_alert
 from utils.logger import log_event
 from PyQt5 import QtCore
 from time import time
+from detectors.face_recognizer import FaceRecognizer
 
 class CameraWidget(QWidget):
     def __init__(self):
@@ -125,37 +126,35 @@ class CameraWidget(QWidget):
 
             # Detection
             if self.detection_enabled:
-                humans = detect_humans(frame)
+                # Detect faces in frame
+                face_locations = self.face_recognizer.detect_faces(frame)
                 current_time = time()
-                for person in humans:
-                    x1, y1, x2, y2 = person["box"]
-                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                
+                for face_location in face_locations:
+                    top, right, bottom, left = face_location
+                    cx, cy = (left + right) // 2, (top + bottom) // 2
 
                     if self.roi and is_inside_roi((cx, cy), self.roi):
-                        # Check if 1 second has passed since last alert
-                        if current_time - self.last_alert_time >= 1.0:
-                            # Create a copy of the frame for logging
-                            log_frame = frame.copy()
-                            
-                            # Handle alert in non-blocking way
-                            QtCore.QTimer.singleShot(0, lambda: trigger_alert())
-                            QtCore.QTimer.singleShot(0, lambda f=log_frame: log_event("Intrusion Detected", f))
-                            
-                            # Update last alert time
-                            self.last_alert_time = current_time
+                        # Try to recognize face
+                        name = self.face_recognizer.recognize_face(frame, face_location)
+                        display_text = name if name else "INTRUDER!"
                         
-                        # Add visual indicator on display frame
-                        cv2.putText(frame, "INTRUDER!", (x1, y1 - 10),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+                        if current_time - self.last_alert_time >= 1.0:
+                            self.trigger_alert(display_text)
+                            self.log_event(display_text, frame.copy())
+                            self.last_alert_time = current_time
 
-                    # Always draw bounding box
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+                        # Draw red box for intruder
+                        cv2.rectangle(frame, (left, top), (right, bottom), (0, 0, 255), 2)
+                        cv2.putText(frame, display_text, (left, top - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+                    else:
+                        # Draw blue box for detected face
+                        cv2.rectangle(frame, (left, top), (right, bottom), (255, 0, 0), 2)
 
-                # Draw ROI
-                if self.roi:
-                    cv2.rectangle(frame, self.roi[0], self.roi[1], (0, 255, 0), 2)
-                elif self.drawing and self.start_point and self.end_point:
-                    cv2.rectangle(frame, self.start_point, self.end_point, (0, 255, 255), 2)
+            # Draw ROI if exists
+            if self.roi:
+                cv2.rectangle(frame, self.roi[0], self.roi[1], (0, 255, 0), 2)
 
             # Convert to RGB and create QPixmap
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
