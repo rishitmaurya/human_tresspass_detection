@@ -6,6 +6,9 @@ from PyQt5.QtCore import Qt, QUrl
 import os
 from utils.logger import IMAGES_DIR
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
+from utils.email.dialog import EmailDialog
+import tempfile
+from datetime import datetime
 
 class CustomWebPage(QWebEnginePage):
     def __init__(self, parent, main_window):
@@ -134,6 +137,12 @@ class MainApp(QMainWindow):
 
         # File menu
         file_menu = self.menubar.addMenu("File")
+        
+        # Email action
+        email_action = QAction("Send Email Report", self)
+        email_action.setStatusTip("Send intrusion report via email")
+        email_action.triggered.connect(self.show_email_dialog)
+        file_menu.addAction(email_action)
 
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(self.close)
@@ -281,6 +290,18 @@ class MainApp(QMainWindow):
 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Could not download data: {str(e)}")
+
+    def show_email_dialog(self):
+        """Show email dialog"""
+        try:
+            dialog = EmailDialog(self)
+            dialog.exec_()
+        except Exception as e:
+            QMessageBox.warning(
+                self, 
+                "Error", 
+                f"Could not open email dialog: {str(e)}"
+            )
 
     def show_about_dialog(self):
         QMessageBox.information(
