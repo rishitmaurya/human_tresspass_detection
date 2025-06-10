@@ -172,6 +172,11 @@ class MainApp(QMainWindow):
             clear_action.setStatusTip("Clear all drawn ROIs")
             clear_action.triggered.connect(self.camera_widget.clear_rois)
             self.draw_menu.addAction(clear_action)
+            
+            danger_action = QAction("Draw Danger ROI", self)
+            danger_action.setStatusTip("Draw a red danger ROI")
+            danger_action.triggered.connect(self.camera_widget.enable_danger_drawing)
+            self.draw_menu.addAction(danger_action)
 
     def on_start_detection(self):
         self.camera_widget.start()

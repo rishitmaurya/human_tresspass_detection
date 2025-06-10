@@ -8,6 +8,9 @@ from utils.geometry import is_inside_roi
 from utils.alert import trigger_alert
 from utils.logger import log_event
 from PyQt5 import QtCore
+import os
+from datetime import datetime
+from utils.email.sender import UniversalEmailSender
 from time import time
 
 class CameraWidget(QWidget):
@@ -18,6 +21,7 @@ class CameraWidget(QWidget):
         self.timer = QTimer()
         
         self.rois = []
+        self.danger_rois = []
         self.current_roi = None  
         self.drawing = False
         self.allow_drawing = False
@@ -25,6 +29,8 @@ class CameraWidget(QWidget):
         self.end_point = None
         self.detection_enabled = False
         self.last_alert_time = 0
+        self.drawing_danger = False
+        self.last_danger_alert_time = 0
         
         self.video_label = QLabel("Video Feed")
         self.video_label.setSizePolicy(
@@ -71,6 +77,13 @@ class CameraWidget(QWidget):
         self.current_roi = None
         self.start_point = None
         self.end_point = None
+        self.drawing_danger = False
+        
+    def enable_danger_drawing(self):
+        
+        self.allow_drawing = True
+        self.drawing = False
+        self.drawing_danger = True
 
     def eventFilter(self, source, event):
         if source is self.video_label and self.allow_drawing:
@@ -108,10 +121,23 @@ class CameraWidget(QWidget):
             if self.detection_enabled:
                 humans = detect_humans(frame)
                 current_time = time()
+                danger_triggered = False
                 for person in humans:
                     x1, y1, x2, y2 = person["box"]
                     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
 
+                    if any(is_inside_roi((cx, cy), roi) for roi in self.danger_rois):
+                        # If first alert (after 1 sec) or 10 sec since last alert
+                        if (self.last_danger_alert_time == 0 and current_time - self.last_alert_time >= 1) or \
+                        (self.last_danger_alert_time != 0 and current_time - self.last_danger_alert_time >= 10):
+                            QtCore.QTimer.singleShot(0, lambda: self.handle_danger_alert(frame.copy()))
+                            self.last_danger_alert_time = current_time
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                        danger_triggered = True
+                    
+                    if not danger_triggered:
+                        self.last_danger_alert_time = 0
+                    
                     if any(is_inside_roi((cx, cy), roi) for roi in self.rois):
                         # Check if 1 second has passed since last alert
                         if current_time - self.last_alert_time >= 1.0:
@@ -135,6 +161,11 @@ class CameraWidget(QWidget):
                 # Draw ROI
                 for roi in self.rois:
                     cv2.rectangle(frame, roi[0], roi[1], (0, 255, 0), 2)
+                    
+                # Draw danger ROIs in red
+                for roi in self.danger_rois:
+                    cv2.rectangle(frame, roi[0], roi[1], (0, 0, 255), 2)
+                    
                 if self.drawing and self.start_point and self.end_point:
                     cv2.rectangle(frame, self.start_point, self.end_point, (0, 255, 255), 2)
 
@@ -157,7 +188,7 @@ class CameraWidget(QWidget):
             self.video_label.setPixmap(scaled_pixmap)
             
     def mousePressEvent(self, event):
-        if self.allow_drawing and not self.drawing:
+        if self.allow_drawing and not self.drawing and event.button() == Qt.LeftButton:
             x, y = self.map_to_video(event.pos())
             self.drawing = True
             self.current_roi = [x, y, x, y]
@@ -170,29 +201,43 @@ class CameraWidget(QWidget):
             self.update()
 
     def mouseReleaseEvent(self, event):
-        if self.allow_drawing and self.drawing and self.current_roi:
+        if self.allow_drawing and self.drawing and self.current_roi and event.button() == Qt.LeftButton:
             x, y = self.map_to_video(event.pos())
             self.current_roi[2] = x
             self.current_roi[3] = y
             x1, y1, x2, y2 = self.current_roi
-            self.rois.append(((min(x1, x2), min(y1, y2)), (max(x1, x2), max(y1, y2))))
+            roi_tuple = ((min(x1, x2), min(y1, y2)), (max(x1, x2), max(y1, y2)))
+            if self.drawing_danger:
+                self.danger_rois.append(roi_tuple)
+            else:
+                self.rois.append(roi_tuple)
             self.current_roi = None
             self.drawing = False
             self.allow_drawing = False
+            self.drawing_danger = False
             self.update()
 
     def paintEvent(self, event):
         super().paintEvent(event)
         painter = QPainter(self)
+        # Draw normal ROIs in green
+        pen = QPen(Qt.green, 2, Qt.SolidLine)
+        painter.setPen(pen)
+        for roi in self.rois:
+            (x1, y1), (x2, y2) = roi
+            painter.drawRect(x1, y1, x2 - x1, y2 - y1)
+        # Draw danger ROIs in red
         pen = QPen(Qt.red, 2, Qt.SolidLine)
         painter.setPen(pen)
-        # Draw all finished ROIs
-        for roi in self.rois:
+        for roi in self.danger_rois:
             (x1, y1), (x2, y2) = roi
             painter.drawRect(x1, y1, x2 - x1, y2 - y1)
         # Draw the current ROI being drawn
         if self.current_roi:
+            
             x1, y1, x2, y2 = self.current_roi
+            pen = QPen(Qt.red if self.drawing_danger else Qt.green, 2, Qt.DashLine)
+            painter.setPen(pen)
             painter.drawRect(min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1))
             
     def map_to_video(self, pos):
@@ -215,7 +260,38 @@ class CameraWidget(QWidget):
     
     def clear_rois(self):
         self.rois.clear()
+        self.danger_rois.clear()
         self.current_roi = None
         self.drawing = False
         self.allow_drawing = False
         self.update()
+        
+    def handle_danger_alert(self, frame):
+        from PyQt5.QtWidgets import QMessageBox
+        QMessageBox.critical(self, "Danger!", "Robot stopped")
+        # Save current frame as image
+        now = datetime.now()
+        date_str = now.strftime("%Y-%m-%d")
+        time_str = now.strftime("%H-%M-%S")
+        day_str = now.strftime("%A")
+        img_name = f"danger_{date_str}_{time_str}.jpg"
+        img_path = os.path.join("danger_alerts", img_name)
+        os.makedirs("danger_alerts", exist_ok=True)
+        cv2.imwrite(img_path, frame)
+        # Send email
+        self.send_danger_email(img_path, date_str, time_str, day_str)
+
+    def send_danger_email(self, img_path, date_str, time_str, day_str):
+        sender = UniversalEmailSender(
+            "shubhamrishit33@gmail.com",
+            "bfcbtywflqclyxbm",  # Use an app password, not your real password!
+            "gmail"
+        )
+        subject = "Danger ROI Intrusion Alert"
+        body = f"Intrusion detected in Danger ROI!\nDate: {date_str}\nTime: {time_str}\nDay: {day_str}"
+        sender.send_email(
+            ["rishitmaurya2002@gmail.com"],
+            subject,
+            body,
+            attachments=[img_path]
+        )
