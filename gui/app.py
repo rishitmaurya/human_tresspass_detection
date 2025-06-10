@@ -167,6 +167,11 @@ class MainApp(QMainWindow):
             draw_action = QAction("Draw ROI", self)
             draw_action.triggered.connect(self.camera_widget.enable_drawing)
             self.draw_menu.addAction(draw_action)
+            
+            clear_action = QAction("Clear ROI", self)
+            clear_action.setStatusTip("Clear all drawn ROIs")
+            clear_action.triggered.connect(self.camera_widget.clear_rois)
+            self.draw_menu.addAction(clear_action)
 
     def on_start_detection(self):
         self.camera_widget.start()

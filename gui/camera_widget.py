@@ -1,7 +1,7 @@
 # camera_widget.py
 import cv2
 from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy
-from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen
 from PyQt5.QtCore import QTimer, Qt, QPoint, QEvent
 from detectors.yolo_detector import detect_humans
 from utils.geometry import is_inside_roi
@@ -17,7 +17,8 @@ class CameraWidget(QWidget):
         self.cap = None
         self.timer = QTimer()
         
-        self.roi = None  # ROI will be set by user
+        self.rois = []
+        self.current_roi = None  
         self.drawing = False
         self.allow_drawing = False
         self.start_point = None
@@ -66,42 +67,22 @@ class CameraWidget(QWidget):
             
     def enable_drawing(self):
         self.allow_drawing = True
+        self.drawing = False
+        self.current_roi = None
+        self.start_point = None
+        self.end_point = None
 
     def eventFilter(self, source, event):
         if source is self.video_label and self.allow_drawing:
-            if event.type() in [QEvent.MouseButtonPress, QEvent.MouseMove, QEvent.MouseButtonRelease]:
-                label_size = self.video_label.size()
-                if self.cap:
-                    ret, frame = self.cap.read()
-                    if not ret:
-                        return super().eventFilter(source, event)
-                    frame_height, frame_width = frame.shape[:2]
-                    scale = min(label_size.width() / frame_width, label_size.height() / frame_height)
-                    new_width = int(frame_width * scale)
-                    new_height = int(frame_height * scale)
-                    x_offset = (label_size.width() - new_width) // 2
-                    y_offset = (label_size.height() - new_height) // 2
-
-                    pos = event.pos()
-                    # Clamp to displayed video area
-                    x = int(max(0, min(new_width - 1, pos.x() - x_offset)))
-                    y = int(max(0, min(new_height - 1, pos.y() - y_offset)))
-
-                    if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
-                        self.drawing = True
-                        self.start_point = (x, y)
-                        self.end_point = self.start_point
-                        return True
-                    elif event.type() == QEvent.MouseMove and self.drawing:
-                        self.end_point = (x, y)
-                        return True
-                    elif event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
-                        self.drawing = False
-                        x1, y1 = self.start_point
-                        x2, y2 = self.end_point
-                        self.roi = [(min(x1, x2), min(y1, y2)), (max(x1, x2), max(y1, y2))]
-                        self.allow_drawing = False
-                        return True
+            if event.type() == QEvent.MouseButtonPress:
+                self.mousePressEvent(event)
+                return True
+            elif event.type() == QEvent.MouseMove:
+                self.mouseMoveEvent(event)
+                return True
+            elif event.type() == QEvent.MouseButtonRelease:
+                self.mouseReleaseEvent(event)
+                return True
         return super().eventFilter(source, event)
 
     def update_frame(self):
@@ -131,7 +112,7 @@ class CameraWidget(QWidget):
                     x1, y1, x2, y2 = person["box"]
                     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
 
-                    if self.roi and is_inside_roi((cx, cy), self.roi):
+                    if any(is_inside_roi((cx, cy), roi) for roi in self.rois):
                         # Check if 1 second has passed since last alert
                         if current_time - self.last_alert_time >= 1.0:
                             # Create a copy of the frame for logging
@@ -152,9 +133,9 @@ class CameraWidget(QWidget):
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
 
                 # Draw ROI
-                if self.roi:
-                    cv2.rectangle(frame, self.roi[0], self.roi[1], (0, 255, 0), 2)
-                elif self.drawing and self.start_point and self.end_point:
+                for roi in self.rois:
+                    cv2.rectangle(frame, roi[0], roi[1], (0, 255, 0), 2)
+                if self.drawing and self.start_point and self.end_point:
                     cv2.rectangle(frame, self.start_point, self.end_point, (0, 255, 255), 2)
 
             # Convert to RGB and create QPixmap
@@ -174,3 +155,67 @@ class CameraWidget(QWidget):
             # Update the display
             self.video_label.setAlignment(Qt.AlignCenter)
             self.video_label.setPixmap(scaled_pixmap)
+            
+    def mousePressEvent(self, event):
+        if self.allow_drawing and not self.drawing:
+            x, y = self.map_to_video(event.pos())
+            self.drawing = True
+            self.current_roi = [x, y, x, y]
+
+    def mouseMoveEvent(self, event):
+        if self.allow_drawing and self.drawing and self.current_roi:
+            x, y = self.map_to_video(event.pos())
+            self.current_roi[2] = x
+            self.current_roi[3] = y
+            self.update()
+
+    def mouseReleaseEvent(self, event):
+        if self.allow_drawing and self.drawing and self.current_roi:
+            x, y = self.map_to_video(event.pos())
+            self.current_roi[2] = x
+            self.current_roi[3] = y
+            x1, y1, x2, y2 = self.current_roi
+            self.rois.append(((min(x1, x2), min(y1, y2)), (max(x1, x2), max(y1, y2))))
+            self.current_roi = None
+            self.drawing = False
+            self.allow_drawing = False
+            self.update()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        pen = QPen(Qt.red, 2, Qt.SolidLine)
+        painter.setPen(pen)
+        # Draw all finished ROIs
+        for roi in self.rois:
+            (x1, y1), (x2, y2) = roi
+            painter.drawRect(x1, y1, x2 - x1, y2 - y1)
+        # Draw the current ROI being drawn
+        if self.current_roi:
+            x1, y1, x2, y2 = self.current_roi
+            painter.drawRect(min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1))
+            
+    def map_to_video(self, pos):
+        label_size = self.video_label.size()
+        if not self.cap:
+            return 0, 0
+        ret, frame = self.cap.read()
+        if not ret:
+            return 0, 0
+        frame_height, frame_width = frame.shape[:2]
+        scale = min(label_size.width() / frame_width, label_size.height() / frame_height)
+        new_width = int(frame_width * scale)
+        new_height = int(frame_height * scale)
+        x_offset = (label_size.width() - new_width) // 2
+        y_offset = (label_size.height() - new_height) // 2
+
+        x = int(max(0, min(new_width - 1, pos.x() - x_offset)))
+        y = int(max(0, min(new_height - 1, pos.y() - y_offset)))
+        return x, y
+    
+    def clear_rois(self):
+        self.rois.clear()
+        self.current_roi = None
+        self.drawing = False
+        self.allow_drawing = False
+        self.update()
