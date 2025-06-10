@@ -164,20 +164,26 @@ class MainApp(QMainWindow):
     def add_draw_menu(self):
         if not self.draw_menu:
             self.draw_menu = self.menubar.addMenu("Draw")
-            draw_action = QAction("Draw ROI", self)
+            draw_action = QAction("Draw Warning Zone", self)
             draw_action.triggered.connect(self.camera_widget.enable_drawing)
             self.draw_menu.addAction(draw_action)
             
-            clear_action = QAction("Clear ROI", self)
+            danger_action = QAction("Draw Danger Zone", self)
+            danger_action.setStatusTip("Draw a red danger ROI")
+            danger_action.triggered.connect(self.camera_widget.enable_danger_drawing)
+            self.draw_menu.addAction(danger_action)
+            
+            change_mail_action = QAction("Change Danger Mail Details", self)
+            change_mail_action.setStatusTip("Change sender/receiver for danger ROI mail")
+            change_mail_action.triggered.connect(self.camera_widget.change_danger_mail_details)
+            self.draw_menu.addAction(change_mail_action)
+            
+            clear_action = QAction("Clear Zone", self)
             clear_action.setStatusTip("Clear all drawn ROIs")
             clear_action.triggered.connect(self.camera_widget.clear_rois)
             self.draw_menu.addAction(clear_action)
             
-            danger_action = QAction("Draw Danger ROI", self)
-            danger_action.setStatusTip("Draw a red danger ROI")
-            danger_action.triggered.connect(self.camera_widget.enable_danger_drawing)
-            self.draw_menu.addAction(danger_action)
-
+            
     def on_start_detection(self):
         self.camera_widget.start()
         self.add_draw_menu()

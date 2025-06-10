@@ -1,8 +1,8 @@
 # camera_widget.py
 import cv2
-from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy
+from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy, QDialog, QFormLayout, QLineEdit, QDialogButtonBox
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen
-from PyQt5.QtCore import QTimer, Qt, QPoint, QEvent
+from PyQt5.QtCore import QTimer, Qt, QPoint, QEvent, QThread, pyqtSignal
 from detectors.yolo_detector import detect_humans
 from utils.geometry import is_inside_roi
 from utils.alert import trigger_alert
@@ -12,6 +12,40 @@ import os
 from datetime import datetime
 from utils.email.sender import UniversalEmailSender
 from time import time
+import json
+
+from PyQt5.QtCore import QThread, pyqtSignal
+
+class DangerEmailThread(QThread):
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, sender, password, receiver, img_path, date_str, time_str, day_str):
+        super().__init__()
+        self.sender = sender
+        self.password = password
+        self.receiver = receiver
+        self.img_path = img_path
+        self.date_str = date_str
+        self.time_str = time_str
+        self.day_str = day_str
+
+    def run(self):
+        try:
+            sender = UniversalEmailSender(
+                self.sender,
+                self.password,
+                "gmail"
+            )
+            subject = "Danger ROI Intrusion Alert"
+            body = f"Intrusion detected in Danger ROI!\nDate: {self.date_str}\nTime: {self.time_str}\nDay: {self.day_str}"
+            sender.send_email(
+                [self.receiver],
+                subject,
+                body,
+                attachments=[self.img_path]
+            )
+        except Exception as e:
+            self.error_signal.emit(str(e))
 
 class CameraWidget(QWidget):
     def __init__(self):
@@ -31,6 +65,12 @@ class CameraWidget(QWidget):
         self.last_alert_time = 0
         self.drawing_danger = False
         self.last_danger_alert_time = 0
+        
+        self.danger_mail_sender = "shubhamrishit33@gmail.com"
+        self.danger_mail_password = "bfcbtywflqclyxbm"
+        self.danger_mail_receiver = "rishitmaurya2002@gmail.com"
+        
+        self.load_danger_mail_config()
         
         self.video_label = QLabel("Video Feed")
         self.video_label.setSizePolicy(
@@ -139,8 +179,8 @@ class CameraWidget(QWidget):
                         self.last_danger_alert_time = 0
                     
                     if any(is_inside_roi((cx, cy), roi) for roi in self.rois):
-                        # Check if 1 second has passed since last alert
-                        if current_time - self.last_alert_time >= 1.0:
+                        # Check if 5 second has passed since last alert
+                        if current_time - self.last_alert_time >= 5.0:
                             # Create a copy of the frame for logging
                             log_frame = frame.copy()
                             
@@ -280,18 +320,68 @@ class CameraWidget(QWidget):
         cv2.imwrite(img_path, frame)
         # Send email
         self.send_danger_email(img_path, date_str, time_str, day_str)
+        
+    def change_danger_mail_details(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Change Danger Mail Details")
+        layout = QFormLayout(dialog)
+
+        sender_edit = QLineEdit(self.danger_mail_sender)
+        password_edit = QLineEdit(self.danger_mail_password)
+        password_edit.setEchoMode(QLineEdit.Password)
+        receiver_edit = QLineEdit(self.danger_mail_receiver)
+
+        layout.addRow("Sender Email:", sender_edit)
+        layout.addRow("Sender Password:", password_edit)
+        layout.addRow("Receiver Email:", receiver_edit)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        layout.addWidget(buttons)
+
+        def on_accept():
+            self.danger_mail_sender = sender_edit.text()
+            self.danger_mail_password = password_edit.text()
+            self.danger_mail_receiver = receiver_edit.text()
+            self.save_danger_mail_config()
+            dialog.accept()
+
+        buttons.accepted.connect(on_accept)
+        buttons.rejected.connect(dialog.reject)
+
+        dialog.exec_()
+        
+    def load_danger_mail_config(self):
+        config_path = "danger_mail_config.json"
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                data = json.load(f)
+                self.danger_mail_sender = data.get("sender", self.danger_mail_sender)
+                self.danger_mail_password = data.get("password", self.danger_mail_password)
+                self.danger_mail_receiver = data.get("receiver", self.danger_mail_receiver)
+
+    def save_danger_mail_config(self):
+        config_path = "danger_mail_config.json"
+        data = {
+            "sender": self.danger_mail_sender,
+            "password": self.danger_mail_password,
+            "receiver": self.danger_mail_receiver
+        }
+        with open(config_path, "w") as f:
+            json.dump(data, f)
 
     def send_danger_email(self, img_path, date_str, time_str, day_str):
-        sender = UniversalEmailSender(
-            "shubhamrishit33@gmail.com",
-            "bfcbtywflqclyxbm",  # Use an app password, not your real password!
-            "gmail"
+        self.email_thread = DangerEmailThread(
+            self.danger_mail_sender,
+            self.danger_mail_password,
+            self.danger_mail_receiver,
+            img_path,
+            date_str,
+            time_str,
+            day_str
         )
-        subject = "Danger ROI Intrusion Alert"
-        body = f"Intrusion detected in Danger ROI!\nDate: {date_str}\nTime: {time_str}\nDay: {day_str}"
-        sender.send_email(
-            ["rishitmaurya2002@gmail.com"],
-            subject,
-            body,
-            attachments=[img_path]
-        )
+        self.email_thread.error_signal.connect(self.show_email_error)
+        self.email_thread.start()
+        
+    def show_email_error(self, error_msg):
+        from PyQt5.QtWidgets import QMessageBox
+        QMessageBox.critical(self, "Danger Mail Error", f"Failed to send danger email:\n{error_msg}")
