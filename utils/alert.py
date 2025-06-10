@@ -1,38 +1,36 @@
-import os
-import time
-import threading
-from playsound import playsound
-from utils.logger import log_event
-from gui.alert_popup import show_alert_popup
-import pygame  # Add this import
+from PyQt5.QtMultimedia import QSound
+from PyQt5.QtCore import QTimer
+from PyQt5.QtWidgets import QMessageBox, QApplication
 
-# Initialize pygame mixer for better sound control
-pygame.mixer.init()
+alert_sound = None
+alert_timer = None
 
-last_alert_time = 0
-alert_cooldown = 5  # seconds
-
-def play_alert_sound():
-    sound_path = os.path.join("assets", "alert.wav")
-    if os.path.exists(sound_path):
-        pygame.mixer.music.load(sound_path)
-        pygame.mixer.music.play(-1)  # -1 means loop indefinitely
-
-def stop_alert_sound():
-    pygame.mixer.music.stop()
+def show_alert_popup():
+    parent = QApplication.activeWindow()
+    QMessageBox.warning(parent, "Intrusion Detected", "INTRUDER detected in ROI!")
 
 def trigger_alert():
-    global last_alert_time
-    current_time = time.time()
+    global alert_sound, alert_timer
+    if alert_sound is None:
+        alert_sound = QSound("assets\\alert.wav")  # Use your alert sound file path
 
-    if current_time - last_alert_time >= alert_cooldown:
-        last_alert_time = current_time
+    if not alert_sound.isFinished():  # Already playing
+        return
 
-        log_event("Intrusion Detected")
+    alert_sound.play()
 
-        # Play sound in a non-blocking way
-        threading.Thread(target=play_alert_sound, daemon=True).start()
+    # Show alert pop-up (on main thread)
+    QTimer.singleShot(0, show_alert_popup)
 
-        # Show GUI popup and stop sound when closed
-        show_alert_popup("ALERT!", "Human entered restricted area!")
-        stop_alert_sound()
+    # Stop after 5 seconds
+    if alert_timer is not None:
+        alert_timer.stop()
+    alert_timer = QTimer()
+    alert_timer.setSingleShot(True)
+    alert_timer.timeout.connect(stop_alert)
+    alert_timer.start(5000)  # 5000 ms = 5 seconds
+
+def stop_alert():
+    global alert_sound
+    if alert_sound:
+        alert_sound.stop()
