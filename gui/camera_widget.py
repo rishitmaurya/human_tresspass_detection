@@ -140,7 +140,13 @@ class CameraWidget(QWidget):
             self.detection_enabled = False
             self.roi = None  
             self.drawing = False
+            self.timer.stop()
+            self.cap.release()
+            self.cap = None
             self.allow_drawing = False
+            self.update()
+        self.video_label.clear()
+        self.video_label.setText("Video Feed")
             
     def enable_drawing(self):
         self.allow_drawing = True

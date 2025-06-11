@@ -7,7 +7,7 @@ import os
 from utils.logger import IMAGES_DIR
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
 from utils.email.dialog import EmailDialog
-import tempfile
+from gui.add_faces_dialog import AddFacesDialog
 from datetime import datetime
 
 class CustomWebPage(QWebEnginePage):
@@ -137,6 +137,12 @@ class MainApp(QMainWindow):
 
         # File menu
         file_menu = self.menubar.addMenu("File")
+        
+        # Add Faces action
+        add_faces_action = QAction("Add Faces", self)
+        add_faces_action.setStatusTip("Add new faces to the recognition database")
+        add_faces_action.triggered.connect(self.show_add_faces_dialog)  # You need to implement this method
+        file_menu.addAction(add_faces_action)
         
         # Email action
         email_action = QAction("Send Email Report", self)
@@ -318,7 +324,16 @@ class MainApp(QMainWindow):
                 "Error", 
                 f"Could not open email dialog: {str(e)}"
             )
-
+            
+    def show_add_faces_dialog(self):
+        was_running = self.camera_widget.detection_enabled
+        self.camera_widget.stop()
+        dialog = AddFacesDialog(self)
+        dialog.exec_()
+        
+        if was_running:
+            self.camera_widget.start()
+        
     def show_about_dialog(self):
         QMessageBox.information(
             self,
