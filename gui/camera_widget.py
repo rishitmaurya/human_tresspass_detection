@@ -1,6 +1,6 @@
 # camera_widget.py
 import cv2
-from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy, QDialog, QFormLayout, QLineEdit, QDialogButtonBox
+from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy, QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QCheckBox, QHBoxLayout
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen
 from PyQt5.QtCore import QTimer, Qt, QPoint, QEvent, QThread, pyqtSignal
 from detectors.yolo_detector import detect_humans
@@ -18,12 +18,13 @@ from PyQt5.QtCore import QThread, pyqtSignal
 
 class DangerEmailThread(QThread):
     error_signal = pyqtSignal(str)
+    success_signal = pyqtSignal()
 
-    def __init__(self, sender, password, receiver, img_path, date_str, time_str, day_str):
+    def __init__(self, sender, password, receivers, img_path, date_str, time_str, day_str):
         super().__init__()
         self.sender = sender
         self.password = password
-        self.receiver = receiver
+        self.receivers = receivers
         self.img_path = img_path
         self.date_str = date_str
         self.time_str = time_str
@@ -36,14 +37,40 @@ class DangerEmailThread(QThread):
                 self.password,
                 "gmail"
             )
-            subject = "Danger ROI Intrusion Alert"
-            body = f"Intrusion detected in Danger ROI!\nDate: {self.date_str}\nTime: {self.time_str}\nDay: {self.day_str}"
+            subject = "[IMPORTANT] Security Alert - Danger Zone Intrusion Detected"
+            body = f"""
+SECURITY ALERT - IMMEDIATE ATTENTION REQUIRED
+
+An unauthorized intrusion has been detected in the designated danger zone.
+
+Details:
+- Date: {self.date_str}
+- Time: {self.time_str}
+- Day: {self.day_str}
+- Location: Robotic Test Cell, SEL
+- Event Type: Human Intrusion in Danger Zone
+An image of the intrusion is attached to this email for verification.
+
+This is an automated security alert. Please take appropriate action immediately.
+
+Best regards,
+Security Monitoring System
+                """
+            headers = {
+                "Importance": "High",
+                "X-Priority": "1",
+                "X-MSMail-Priority": "High",
+                "List-Unsubscribe": f"<mailto:{self.sender}?subject=unsubscribe>"
+            }
+            
             sender.send_email(
-                [self.receiver],
+                self.receivers,
                 subject,
                 body,
-                attachments=[self.img_path]
+                attachments=[self.img_path],
+                headers=headers
             )
+            self.success_signal.emit()
         except Exception as e:
             self.error_signal.emit(str(e))
 
@@ -66,9 +93,13 @@ class CameraWidget(QWidget):
         self.drawing_danger = False
         self.last_danger_alert_time = 0
         
-        self.danger_mail_sender = "shubhamrishit33@gmail.com"
-        self.danger_mail_password = "bfcbtywflqclyxbm"
-        self.danger_mail_receiver = "rishitmaurya2002@gmail.com"
+        self.danger_mail_sender = "sender@gmail.com"
+        self.danger_mail_password = "password"
+        self.danger_mail_receivers = {
+            "receiver1": {"email": "receiver@gmail.com", "enabled": True},
+            "receiver2": {"email": "", "enabled": False},
+            "receiver3": {"email": "", "enabled": False}
+        }
         
         self.load_danger_mail_config()
         
@@ -329,19 +360,37 @@ class CameraWidget(QWidget):
         sender_edit = QLineEdit(self.danger_mail_sender)
         password_edit = QLineEdit(self.danger_mail_password)
         password_edit.setEchoMode(QLineEdit.Password)
-        receiver_edit = QLineEdit(self.danger_mail_receiver)
-
+        
+        receiver_edits = {}
+        receiver_checkboxes = {}
+        
         layout.addRow("Sender Email:", sender_edit)
         layout.addRow("Sender Password:", password_edit)
-        layout.addRow("Receiver Email:", receiver_edit)
-
+        
+        for i, (key, value) in enumerate(self.danger_mail_receivers.items(), 1):
+            h_layout = QHBoxLayout()
+            edit = QLineEdit(value["email"])
+            checkbox = QCheckBox("Enable")
+            checkbox.setChecked(value["enabled"])
+            
+            h_layout.addWidget(edit)
+            h_layout.addWidget(checkbox)
+            
+            receiver_edits[key] = edit
+            receiver_checkboxes[key] = checkbox
+            layout.addRow(f"Receiver {i} Email:", h_layout)
+        
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         layout.addWidget(buttons)
 
         def on_accept():
             self.danger_mail_sender = sender_edit.text()
             self.danger_mail_password = password_edit.text()
-            self.danger_mail_receiver = receiver_edit.text()
+            
+            for key in self.danger_mail_receivers:
+                self.danger_mail_receivers[key]["email"] = receiver_edits[key].text()
+                self.danger_mail_receivers[key]["enabled"] = receiver_checkboxes[key].isChecked()
+            
             self.save_danger_mail_config()
             dialog.accept()
 
@@ -357,30 +406,47 @@ class CameraWidget(QWidget):
                 data = json.load(f)
                 self.danger_mail_sender = data.get("sender", self.danger_mail_sender)
                 self.danger_mail_password = data.get("password", self.danger_mail_password)
-                self.danger_mail_receiver = data.get("receiver", self.danger_mail_receiver)
+                self.danger_mail_receivers = data.get("receivers", self.danger_mail_receivers)
 
     def save_danger_mail_config(self):
         config_path = "danger_mail_config.json"
         data = {
             "sender": self.danger_mail_sender,
             "password": self.danger_mail_password,
-            "receiver": self.danger_mail_receiver
+            "receivers": self.danger_mail_receivers
         }
         with open(config_path, "w") as f:
             json.dump(data, f)
 
     def send_danger_email(self, img_path, date_str, time_str, day_str):
+        
+        active_receivers = [
+            receiver["email"] 
+            for receiver in self.danger_mail_receivers.values() 
+            if receiver["enabled"] and receiver["email"].strip()
+        ]
+        
+        if not active_receivers:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Warning", "No active email receivers configured!")
+            return
+        
         self.email_thread = DangerEmailThread(
             self.danger_mail_sender,
             self.danger_mail_password,
-            self.danger_mail_receiver,
+            active_receivers,
             img_path,
             date_str,
             time_str,
             day_str
         )
         self.email_thread.error_signal.connect(self.show_email_error)
+        self.email_thread.success_signal.connect(self.show_email_success)
         self.email_thread.start()
+        
+    def show_email_success(self):
+        from PyQt5.QtWidgets import QMessageBox
+        QMessageBox.information(self, "Email Sent", "Danger alert email sent successfully!")
         
     def show_email_error(self, error_msg):
         from PyQt5.QtWidgets import QMessageBox

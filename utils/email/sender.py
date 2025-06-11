@@ -64,12 +64,19 @@ class UniversalEmailSender:
                        to_emails: List[str], 
                        subject: str, 
                        body: str, 
-                       attachments: Optional[List[str]] = None) -> MIMEMultipart:
+                       attachments: Optional[List[str]] = None,
+                       headers: Optional[Dict[str, str]] = None ) -> MIMEMultipart:
         """Create email message with attachments"""
         msg = MIMEMultipart()
         msg['From'] = self.email
         msg['To'] = ', '.join(to_emails)
         msg['Subject'] = subject
+        
+        
+        if headers:
+            for key, value in headers.items():
+                msg[key] = value
+        
         msg.attach(MIMEText(body, 'plain'))
 
         if attachments:
@@ -89,7 +96,9 @@ class UniversalEmailSender:
                   to_emails: List[str], 
                   subject: str, 
                   body: str, 
-                  attachments: Optional[List[str]] = None) -> bool:
+                  attachments: Optional[List[str]] = None,
+                  headers: Optional[Dict[str, str]] = None
+                  ) -> bool:
         """
         Send email with optional attachments
         Returns:
@@ -98,7 +107,7 @@ class UniversalEmailSender:
         if not isinstance(to_emails, list):
             to_emails = [to_emails]
 
-        msg = self._create_message(to_emails, subject, body, attachments)
+        msg = self._create_message(to_emails, subject, body, attachments, headers)
         
         try:
             # Choose SMTP class based on SSL setting
