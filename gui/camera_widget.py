@@ -18,6 +18,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 
 class DangerEmailThread(QThread):
     error_signal = pyqtSignal(str)
+    success_signal = pyqtSignal()
 
     def __init__(self, sender, password, receiver, img_path, date_str, time_str, day_str):
         super().__init__()
@@ -44,6 +45,7 @@ class DangerEmailThread(QThread):
                 body,
                 attachments=[self.img_path]
             )
+            self.success_signal.emit()
         except Exception as e:
             self.error_signal.emit(str(e))
 
@@ -380,7 +382,12 @@ class CameraWidget(QWidget):
             day_str
         )
         self.email_thread.error_signal.connect(self.show_email_error)
+        self.email_thread.success_signal.connect(self.show_email_success)
         self.email_thread.start()
+        
+    def show_email_success(self):
+        from PyQt5.QtWidgets import QMessageBox
+        QMessageBox.information(self, "Email Sent", "Danger alert email sent successfully!")
         
     def show_email_error(self, error_msg):
         from PyQt5.QtWidgets import QMessageBox
