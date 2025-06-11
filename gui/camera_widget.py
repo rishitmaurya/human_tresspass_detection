@@ -13,7 +13,7 @@ from datetime import datetime
 from utils.email.sender import UniversalEmailSender
 from time import time
 import json
-
+from detectors.face_recognizer import FaceRecognizer
 from PyQt5.QtCore import QThread, pyqtSignal
 
 class DangerEmailThread(QThread):
@@ -124,7 +124,7 @@ class CameraWidget(QWidget):
         self.setLayout(layout)
         
         self.timer.timeout.connect(self.update_frame)
-        
+        self.face_recognizer = FaceRecognizer()
         
 
     def start(self):
@@ -234,7 +234,7 @@ class CameraWidget(QWidget):
 
                     # Always draw bounding box
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
-
+                
                 # Draw ROI
                 for roi in self.rois:
                     cv2.rectangle(frame, roi[0], roi[1], (0, 255, 0), 2)
@@ -245,6 +245,13 @@ class CameraWidget(QWidget):
                     
                 if self.drawing and self.start_point and self.end_point:
                     cv2.rectangle(frame, self.start_point, self.end_point, (0, 255, 255), 2)
+
+                face_results = self.face_recognizer.recognize_faces(frame)
+                for result in face_results:
+                    name = result["name"]
+                    top, right, bottom, left = result["location"]
+                    cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 255), 2)
+                    cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
             # Convert to RGB and create QPixmap
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
