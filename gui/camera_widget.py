@@ -93,10 +93,10 @@ class CameraWidget(QWidget):
         self.drawing_danger = False
         self.last_danger_alert_time = 0
         
-        self.danger_mail_sender = "shubhamrishit33@gmail.com"
-        self.danger_mail_password = "bfcbtywflqclyxbm"
+        self.danger_mail_sender = "sender@gmail.com"
+        self.danger_mail_password = "password"
         self.danger_mail_receivers = {
-            "receiver1": {"email": "rishitmaurya2002@gmail.com", "enabled": True},
+            "receiver1": {"email": "receiver@gmail.com", "enabled": True},
             "receiver2": {"email": "", "enabled": False},
             "receiver3": {"email": "", "enabled": False}
         }
