@@ -37,13 +37,38 @@ class DangerEmailThread(QThread):
                 self.password,
                 "gmail"
             )
-            subject = "Danger ROI Intrusion Alert"
-            body = f"Intrusion detected in Danger ROI!\nDate: {self.date_str}\nTime: {self.time_str}\nDay: {self.day_str}"
+            subject = "[IMPORTANT] Security Alert - Danger Zone Intrusion Detected"
+            body = f"""
+SECURITY ALERT - IMMEDIATE ATTENTION REQUIRED
+
+An unauthorized intrusion has been detected in the designated danger zone.
+
+Details:
+- Date: {self.date_str}
+- Time: {self.time_str}
+- Day: {self.day_str}
+- Location: Robotic Test Cell, SEL
+- Event Type: Human Intrusion in Danger Zone
+An image of the intrusion is attached to this email for verification.
+
+This is an automated security alert. Please take appropriate action immediately.
+
+Best regards,
+Security Monitoring System
+                """
+            headers = {
+                "Importance": "High",
+                "X-Priority": "1",
+                "X-MSMail-Priority": "High",
+                "List-Unsubscribe": f"<mailto:{self.sender}?subject=unsubscribe>"
+            }
+            
             sender.send_email(
                 self.receivers,
                 subject,
                 body,
-                attachments=[self.img_path]
+                attachments=[self.img_path],
+                headers=headers
             )
             self.success_signal.emit()
         except Exception as e:
