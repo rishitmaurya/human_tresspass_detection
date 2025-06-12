@@ -128,23 +128,38 @@ class CameraWidget(QWidget):
         
 
     def start(self):
-        self.cap = cv2.VideoCapture(0)
-        if not self.cap.isOpened():
-            print("Error: Could not open video capture.")
-            return
-        self.detection_enabled = True
-        self.timer.start(30)
+        try:
+            self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)  # Add CAP_DSHOW for Windows
+            if not self.cap.isOpened():
+                print("Error: Could not open video capture.")
+                return
+                
+            # Set camera properties for better performance
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # Set resolution
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            self.cap.set(cv2.CAP_PROP_FPS, 30)  # Set FPS
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer size
+            
+            # self.frame_count = 0  # Add frame counter for processing
+            self.detection_enabled = True
+            self.timer.start(33)  # ~30 FPS
+            
+        except Exception as e:
+            print(f"Error starting camera: {str(e)}")
+
 
     def stop(self):
         if self.cap:
-            self.detection_enabled = False
-            self.roi = None  
-            self.drawing = False
             self.timer.stop()
-            self.cap.release()
-            self.cap = None
+            self.detection_enabled = False
+            self.roi = None
+            self.drawing = False
             self.allow_drawing = False
-            self.update()
+            try:
+                self.cap.release()
+                self.cap = None
+            except:
+                pass
         self.video_label.clear()
         self.video_label.setText("Video Feed")
             
@@ -176,35 +191,44 @@ class CameraWidget(QWidget):
         return super().eventFilter(source, event)
 
     def update_frame(self):
-        if self.cap:
+        if not self.cap or not self.cap.isOpened():
+            return
+            
+        try:
             ret, frame = self.cap.read()
             if not ret:
                 return
-            
+                
+            # Skip frames to reduce processing load
+            # self.frame_count += 1
+            # if self.frame_count % 2 != 0:  # Process every other frame
+            #     return
+                
             # Get current label size for proper scaling
             label_size = self.video_label.size()
             frame_height, frame_width = frame.shape[:2]
             
-            # Calculate scaling to maintain aspect ratio
-            scale = min(label_size.width() / frame_width, 
-                    label_size.height() / frame_height)
-            new_width = int(frame_width * scale)
-            new_height = int(frame_height * scale)
-            
-            # Resize frame while maintaining aspect ratio
-            frame = cv2.resize(frame, (new_width, new_height))
+            # Create smaller frame for processing (640x360)
+            process_frame = cv2.resize(frame, (640, 360))
 
-            # Detection
+            # Detection on smaller frame
             if self.detection_enabled:
-                humans = detect_humans(frame)
+                humans = detect_humans(process_frame)
                 current_time = time()
                 danger_triggered = False
+                
+                # Scale detection boxes back to original size
+                scale_x = frame_width / 640
+                scale_y = frame_height / 360
+                
                 for person in humans:
-                    x1, y1, x2, y2 = person["box"]
+                    x1, y1, x2, y2 = [int(coord) for coord in person["box"]]
+                    # Scale coordinates back to original frame size
+                    x1, x2 = int(x1 * scale_x), int(x2 * scale_x)
+                    y1, y2 = int(y1 * scale_y), int(y2 * scale_y)
                     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
 
                     if any(is_inside_roi((cx, cy), roi) for roi in self.danger_rois):
-                        # If first alert (after 1 sec) or 10 sec since last alert
                         if (self.last_danger_alert_time == 0 and current_time - self.last_alert_time >= 1) or \
                         (self.last_danger_alert_time != 0 and current_time - self.last_danger_alert_time >= 10):
                             QtCore.QTimer.singleShot(0, lambda: self.handle_danger_alert(frame.copy()))
@@ -216,60 +240,65 @@ class CameraWidget(QWidget):
                         self.last_danger_alert_time = 0
                     
                     if any(is_inside_roi((cx, cy), roi) for roi in self.rois):
-                        # Check if 5 second has passed since last alert
                         if current_time - self.last_alert_time >= 5.0:
-                            # Create a copy of the frame for logging
-                            log_frame = frame.copy()
-                            
-                            # Handle alert in non-blocking way
                             QtCore.QTimer.singleShot(0, lambda: trigger_alert())
-                            QtCore.QTimer.singleShot(0, lambda f=log_frame: log_event("Intrusion Detected", f))
-                            
-                            # Update last alert time
+                            QtCore.QTimer.singleShot(0, lambda f=frame.copy(): log_event("Intrusion Detected", f))
                             self.last_alert_time = current_time
                         
-                        # Add visual indicator on display frame
                         cv2.putText(frame, "INTRUDER!", (x1, y1 - 10),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
 
-                    # Always draw bounding box
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
-                
-                # Draw ROI
+
+                # Draw ROIs
                 for roi in self.rois:
                     cv2.rectangle(frame, roi[0], roi[1], (0, 255, 0), 2)
-                    
-                # Draw danger ROIs in red
                 for roi in self.danger_rois:
                     cv2.rectangle(frame, roi[0], roi[1], (0, 0, 255), 2)
-                    
                 if self.drawing and self.start_point and self.end_point:
                     cv2.rectangle(frame, self.start_point, self.end_point, (0, 255, 255), 2)
 
-                face_results = self.face_recognizer.recognize_faces(frame)
+                # Face recognition on smaller frame
+                face_results = self.face_recognizer.recognize_faces(process_frame)
                 for result in face_results:
                     name = result["name"]
                     top, right, bottom, left = result["location"]
+                    # Scale face coordinates back
+                    left = int(left * scale_x)
+                    right = int(right * scale_x)
+                    top = int(top * scale_y)
+                    bottom = int(bottom * scale_y)
                     cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 255), 2)
                     cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
-            # Convert to RGB and create QPixmap
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # Calculate display scaling
+            scale = min(label_size.width() / frame_width, 
+                    label_size.height() / frame_height)
+            new_width = int(frame_width * scale)
+            new_height = int(frame_height * scale)
+            
+            # Resize for display
+            display_frame = cv2.resize(frame, (new_width, new_height))
+
+            # Convert to RGB and create QPixmap more efficiently
+            rgb = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
             h, w, ch = rgb.shape
-            bytes_per_line = ch * w
-            qt_image = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+            qt_image = QImage(rgb.data, w, h, w * ch, QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(qt_image)
             
-            # Scale pixmap to fit label while maintaining aspect ratio
+            # Scale pixmap to fit label
             scaled_pixmap = pixmap.scaled(
-                label_size, 
-                Qt.KeepAspectRatio, 
-                Qt.SmoothTransformation
+                label_size.width(),
+                label_size.height(),
+                Qt.KeepAspectRatio,
+                Qt.FastTransformation  # Use faster scaling
             )
             
-            # Update the display
             self.video_label.setAlignment(Qt.AlignCenter)
             self.video_label.setPixmap(scaled_pixmap)
+            
+        except Exception as e:
+            print(f"Error updating frame: {str(e)}")
             
     def mousePressEvent(self, event):
         if self.allow_drawing and not self.drawing and event.button() == Qt.LeftButton:
