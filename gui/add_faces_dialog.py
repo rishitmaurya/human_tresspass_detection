@@ -16,12 +16,39 @@ class CameraThread(QThread):
         self.running = True
 
     def run(self):
-        cap = cv2.VideoCapture(0)
-        while self.running:
-            ret, frame = cap.read()
-            if ret:
-                self.frame_captured.emit(frame)
-        cap.release()
+        try:
+            # Use DirectShow backend for faster startup on Windows
+            cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            if not cap.isOpened():
+                print("Error: Could not open camera")
+                return
+
+            # Optimize camera settings
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FPS, 30)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M','J','P','G'))
+            cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+
+            # Warm up the camera
+            for _ in range(5):
+                ret, _ = cap.read()
+                if not ret:
+                    break
+
+            while self.running:
+                ret, frame = cap.read()
+                if ret:
+                    self.frame_captured.emit(frame)
+                else:
+                    print("Error: Failed to capture frame")
+                    break
+
+        except Exception as e:
+            print(f"Camera error: {str(e)}")
+        finally:
+            cap.release()
 
     def stop(self):
         self.running = False
@@ -72,13 +99,17 @@ class AddFacesDialog(QDialog):
         layout.addWidget(self.save_btn)
 
     def start_camera(self):
-        self.camera_thread = CameraThread()
-        self.camera_thread.frame_captured.connect(self.update_preview)
-        self.camera_thread.start()
-        self.take_picture_btn.setEnabled(False)
-        self.capture_btn.setEnabled(True)
-        self.stop_camera_btn.setEnabled(True)
-        self.status_label.setText("Camera started. Click 'Capture' to take a photo.")
+        try:
+            if self.camera_thread is None:
+                self.camera_thread = CameraThread(self)
+                self.camera_thread.frame_captured.connect(self.update_preview)
+                self.camera_thread.start()
+                self.take_picture_btn.setEnabled(False)
+                self.capture_btn.setEnabled(True)
+                self.stop_camera_btn.setEnabled(True)
+                self.status_label.setText("Starting camera...")
+        except Exception as e:
+            QMessageBox.critical(self, "Camera Error", f"Failed to start camera: {str(e)}")
 
     def update_preview(self, frame):
         rgb_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
