@@ -1,42 +1,4 @@
-import os
-from datetime import datetime
-import cv2
 
-LOG_FILE = os.path.join("logs", "alert_log.html")
-IMAGES_DIR = os.path.join("logs", "images")
-event_counter = 0
-
-def log_event(event, frame=None, person_name=None):
-    """
-    Appends an event to the alert log with timestamp and image if provided.
-
-    Args:
-        event (str): Description of the event
-        frame (numpy.ndarray, optional): The image frame to save
-        person_name (str, optional): Name of the recognized person
-    """
-    global event_counter
-    event_counter += 1
-    
-    # Create directories if they don't exist
-    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-    os.makedirs(IMAGES_DIR, exist_ok=True)
-
-    timestamp = datetime.now()
-    date_str = timestamp.strftime("%Y-%m-%d")
-    time_str = timestamp.strftime("%H:%M:%S")
-
-    # Save image if provided
-    image_path = None
-    if frame is not None:
-        image_filename = f"intrusion_{event_counter}_{timestamp.strftime('%Y%m%d_%H%M%S')}.jpg"
-        image_path = os.path.join(IMAGES_DIR, image_filename)
-        cv2.imwrite(image_path, frame)
-
-    # Create or update HTML log
-    if not os.path.exists(LOG_FILE):
-        with open(LOG_FILE, "w", encoding='utf-8') as f:
-            f.write("""
             <html>
             <head>
                 <style>
@@ -174,7 +136,7 @@ def log_event(event, frame=None, person_name=None):
                 <div class="container">
                     <div class="header">
                         <h2>Intrusion Detection Log</h2>
-                        <span class="total-count">Total Detections: 0</span>
+                        <span class="total-count">Total Detections: 1</span>
                         <button class="download-btn" onclick="downloadData()">Download</button>
                     </div>
                     <script>
@@ -201,36 +163,20 @@ def log_event(event, frame=None, person_name=None):
                             <th>Name</th>
                             <th>Evidence</th>
                         </tr>
-            """)
-
-    # Create new entry (to be inserted at the top)
-    name_display = person_name if person_name else "Unknown"
-    name_class = "person-name" if person_name and person_name != "Unknown" else "person-name unknown"
-    
-    entry = f"""
     <tr>
-        <td class="serial">{event_counter}</td>
-        <td class="timestamp">{date_str}</td>
-        <td class="timestamp">{time_str}</td>
-        <td class="event-text">{event}</td>
-        <td class="{name_class}">{name_display}</td>
-        <td class="image-cell">{"<img src='images/" + os.path.basename(image_path) + "'>" if image_path else "No image"}</td>
-    </tr>"""
-
-    # Modified to insert new entries at the top
-    with open(LOG_FILE, "r+", encoding='utf-8') as f:
-        content = f.read()
-        table_start = content.find("<tr>\n                            <th")
-        if table_start != -1:
-            # Find the position after the header row
-            insert_pos = content.find("</tr>", table_start) + 5
-            # Update total count
-            old_count = int(content[content.find("Total Detections: ") + 17:].split("<")[0])
-            new_content = content[:insert_pos] + entry + content[insert_pos:]
-            new_content = new_content.replace(f"Total Detections: {old_count}", f"Total Detections: {event_counter}")
-            f.seek(0)
-            f.write(new_content)
-            f.truncate()
-        else:
-            f.seek(0, 2)
-            f.write(entry + "\n</table>\n</div>\n</body>\n</html>")
+        <td class="serial">1</td>
+        <td class="timestamp">2025-06-13</td>
+        <td class="timestamp">19:17:10</td>
+        <td class="event-text">Intrusion Detected</td>
+        <td class="person-name">rishit</td>
+        <td class="image-cell"><img src='images/intrusion_1_20250613_191710.jpg'></td>
+    </tr>
+    <tr>
+        <td class="serial">1</td>
+        <td class="timestamp">2025-06-13</td>
+        <td class="timestamp">19:10:43</td>
+        <td class="event-text">Intrusion Detected</td>
+        <td class="person-name unknown">Unknown</td>
+        <td class="image-cell"><img src='images/intrusion_1_20250613_191043.jpg'></td>
+    </tr>
+            

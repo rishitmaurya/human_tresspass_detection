@@ -199,11 +199,6 @@ class CameraWidget(QWidget):
             if not ret:
                 return
                 
-            # Skip frames to reduce processing load
-            # self.frame_count += 1
-            # if self.frame_count % 2 != 0:  # Process every other frame
-            #     return
-                
             # Get current label size for proper scaling
             label_size = self.video_label.size()
             frame_height, frame_width = frame.shape[:2]
@@ -221,12 +216,43 @@ class CameraWidget(QWidget):
                 scale_x = frame_width / 640
                 scale_y = frame_height / 360
                 
+                # Face recognition on smaller frame
+                face_results = self.face_recognizer.recognize_faces(process_frame)
+                
+                # Create a mapping of face locations to names for quick lookup
+                face_name_map = {}
+                for result in face_results:
+                    name = result["name"]
+                    top, right, bottom, left = result["location"]
+                    # Scale face coordinates back
+                    left = int(left * scale_x)
+                    right = int(right * scale_x)
+                    top = int(top * scale_y)
+                    bottom = int(bottom * scale_y)
+                    
+                    # Store face center point and name
+                    face_center_x = (left + right) // 2
+                    face_center_y = (top + bottom) // 2
+                    face_name_map[(face_center_x, face_center_y)] = name
+                    
+                    cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 255), 2)
+                    cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+                
                 for person in humans:
                     x1, y1, x2, y2 = [int(coord) for coord in person["box"]]
                     # Scale coordinates back to original frame size
                     x1, x2 = int(x1 * scale_x), int(x2 * scale_x)
                     y1, y2 = int(y1 * scale_y), int(y2 * scale_y)
                     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+
+                    # Find the closest face to this person detection
+                    detected_name = "Unknown"
+                    min_distance = float('inf')
+                    for (face_x, face_y), name in face_name_map.items():
+                        distance = ((cx - face_x) ** 2 + (cy - face_y) ** 2) ** 0.5
+                        if distance < min_distance and distance < 100:  # Within 100 pixels
+                            min_distance = distance
+                            detected_name = name
 
                     if any(is_inside_roi((cx, cy), roi) for roi in self.danger_rois):
                         if (self.last_danger_alert_time == 0 and current_time - self.last_alert_time >= 1) or \
@@ -242,7 +268,8 @@ class CameraWidget(QWidget):
                     if any(is_inside_roi((cx, cy), roi) for roi in self.rois):
                         if current_time - self.last_alert_time >= 5.0:
                             QtCore.QTimer.singleShot(0, lambda: trigger_alert())
-                            QtCore.QTimer.singleShot(0, lambda f=frame.copy(): log_event("Intrusion Detected", f))
+                            # Pass the detected name to the logger
+                            QtCore.QTimer.singleShot(0, lambda f=frame.copy(), n=detected_name: log_event("Intrusion Detected", f, n))
                             self.last_alert_time = current_time
                         
                         cv2.putText(frame, "INTRUDER!", (x1, y1 - 10),
@@ -257,19 +284,6 @@ class CameraWidget(QWidget):
                     cv2.rectangle(frame, roi[0], roi[1], (0, 0, 255), 2)
                 if self.drawing and self.start_point and self.end_point:
                     cv2.rectangle(frame, self.start_point, self.end_point, (0, 255, 255), 2)
-
-                # Face recognition on smaller frame
-                face_results = self.face_recognizer.recognize_faces(process_frame)
-                for result in face_results:
-                    name = result["name"]
-                    top, right, bottom, left = result["location"]
-                    # Scale face coordinates back
-                    left = int(left * scale_x)
-                    right = int(right * scale_x)
-                    top = int(top * scale_y)
-                    bottom = int(bottom * scale_y)
-                    cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 255), 2)
-                    cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
             # Calculate display scaling
             scale = min(label_size.width() / frame_width, 
