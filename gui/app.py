@@ -25,8 +25,8 @@ class MainApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Human Trespass Detection System")
-        self.setMinimumSize(800, 600)
-        self.resize(1000, 700)
+        self.setMinimumSize(1400, 900)
+        self.resize(1600, 1000)
 
         self.setStyleSheet("""
         QMainWindow {
@@ -36,11 +36,11 @@ class MainApp(QMainWindow):
             background-color: #1a237e;
             color: white;
             border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            font-size: 14px;
-            min-width: 120px;
-            margin: 5px;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 16px;
+            min-width: 140px;
+            margin: 8px;
         }
         QPushButton:hover {
             background-color: #283593;
@@ -61,7 +61,7 @@ class MainApp(QMainWindow):
             QSizePolicy.Expanding, 
             QSizePolicy.Expanding
         )
-        self.camera_widget.setMinimumSize(640, 480)
+        self.camera_widget.setMinimumSize(1280, 720)
         
         self.draw_menu = None
         self.menubar = self.menuBar()

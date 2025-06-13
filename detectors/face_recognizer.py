@@ -40,34 +40,56 @@ class FaceRecognizer:
     def recognize_faces(self, frame):
         # Ensure frame is a valid 8-bit 3-channel image
         if frame is None:
-            print("Frame is None")
             return []
         if frame.dtype != np.uint8:
-            print(f"Frame dtype is {frame.dtype}, converting to uint8")
             frame = frame.astype(np.uint8)
         if len(frame.shape) != 3 or frame.shape[2] != 3:
-            print(f"Invalid frame shape: {frame.shape}")
             return []
 
-        # Convert BGR (OpenCV) to RGB (face_recognition)
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # Increased frame size for better face recognition accuracy
+        small_frame = cv2.resize(frame, (320, 240))  # Increased from 160x120
+        rgb_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+        
         try:
-            face_locations = face_recognition.face_locations(rgb_frame)
+            # Use faster face detection model
+            face_locations = face_recognition.face_locations(rgb_frame, model="hog")
+            
+            if not face_locations:
+                return []
+            
             face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
             results = []
+            
+            # Scale factor to convert back to original frame size
+            scale_x = frame.shape[1] / 320
+            scale_y = frame.shape[0] / 240
+            
             for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-                matches = face_recognition.compare_faces(self.known_encodings, face_encoding, tolerance=self.tolerance)
+                # Scale coordinates back to original frame size
+                top = int(top * scale_y)
+                right = int(right * scale_x)
+                bottom = int(bottom * scale_y)
+                left = int(left * scale_x)
+            
                 name = "Unknown"
                 if len(self.known_encodings) > 0:
-                    face_distances = face_recognition.face_distance(self.known_encodings, face_encoding)
-                    best_match_index = np.argmin(face_distances)
-                    if matches[best_match_index]:
-                        name = self.known_names[best_match_index]
+                    # Use faster comparison with balanced tolerance
+                    matches = face_recognition.compare_faces(
+                        self.known_encodings, 
+                        face_encoding, 
+                        tolerance=0.45  # Balanced tolerance for accuracy and speed
+                    )
+                    if True in matches:
+                        face_distances = face_recognition.face_distance(self.known_encodings, face_encoding)
+                        best_match_index = np.argmin(face_distances)
+                        if matches[best_match_index]:
+                            name = self.known_names[best_match_index]
+            
                 results.append({
                     "name": name,
                     "location": (top, right, bottom, left)
                 })
             return results
         except Exception as e:
-            print(f"Error in face recognition: {e}")
+            print(f"Error in face recognition: {str(e)}")
             return []

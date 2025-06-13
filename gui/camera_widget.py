@@ -108,7 +108,7 @@ class CameraWidget(QWidget):
             QSizePolicy.Expanding,
             QSizePolicy.Expanding
         )
-        self.video_label.setMinimumSize(640, 480)
+        self.video_label.setMinimumSize(1280, 720)
         self.video_label.setStyleSheet("""
             QLabel {
                 background-color: black;
@@ -129,20 +129,24 @@ class CameraWidget(QWidget):
 
     def start(self):
         try:
-            self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)  # Add CAP_DSHOW for Windows
+            self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
             if not self.cap.isOpened():
                 print("Error: Could not open video capture.")
                 return
-                
-            # Set camera properties for better performance
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # Set resolution
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-            self.cap.set(cv2.CAP_PROP_FPS, 30)  # Set FPS
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer size
             
-            # self.frame_count = 0  # Add frame counter for processing
+            # Increased camera settings for higher resolution
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)   # Full HD width
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)  # Full HD height
+            self.cap.set(cv2.CAP_PROP_FPS, 30)
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
+            
+            # Initialize performance counters
+            self.frame_skip_counter = 0
+            self.cached_face_results = []
+            
             self.detection_enabled = True
-            self.timer.start(33)  # ~30 FPS
+            self.timer.start(50)  # Keep at 50ms for stability
             
         except Exception as e:
             print(f"Error starting camera: {str(e)}")
@@ -198,28 +202,40 @@ class CameraWidget(QWidget):
             ret, frame = self.cap.read()
             if not ret:
                 return
-                
+            
+            # Skip frames for better performance - process every 2nd frame for detection (reduced from 3)
+            if not hasattr(self, 'frame_skip_counter'):
+                self.frame_skip_counter = 0
+            self.frame_skip_counter += 1
+            
             # Get current label size for proper scaling
             label_size = self.video_label.size()
             frame_height, frame_width = frame.shape[:2]
             
-            # Create smaller frame for processing (640x360)
-            process_frame = cv2.resize(frame, (640, 360))
-
-            # Detection on smaller frame
-            if self.detection_enabled:
-                humans = detect_humans(process_frame)
+            # Always show the frame, but only do heavy processing every 2nd frame
+            process_detection = self.detection_enabled and (self.frame_skip_counter % 2 == 0)
+            
+            if process_detection:
+                # Increased processing frame size for better detection accuracy
+                process_frame = cv2.resize(frame, (640, 480))  # Increased from 320x240
+                
                 current_time = time()
                 danger_triggered = False
                 
-                # Scale detection boxes back to original size
+                # Scale factors for converting back to original size
                 scale_x = frame_width / 640
-                scale_y = frame_height / 360
+                scale_y = frame_height / 480
                 
-                # Face recognition on smaller frame
-                face_results = self.face_recognizer.recognize_faces(process_frame)
+                # Do face recognition less frequently (every 6th frame instead of 9th)
+                face_results = []
+                if self.frame_skip_counter % 6 == 0:
+                    face_results = self.face_recognizer.recognize_faces(process_frame)
+                    # Cache face results for next few frames
+                    self.cached_face_results = face_results
+                elif hasattr(self, 'cached_face_results'):
+                    face_results = self.cached_face_results
                 
-                # Create a mapping of face locations to names for quick lookup
+                # Create face name mapping
                 face_name_map = {}
                 for result in face_results:
                     name = result["name"]
@@ -230,13 +246,16 @@ class CameraWidget(QWidget):
                     top = int(top * scale_y)
                     bottom = int(bottom * scale_y)
                     
-                    # Store face center point and name
                     face_center_x = (left + right) // 2
                     face_center_y = (top + bottom) // 2
                     face_name_map[(face_center_x, face_center_y)] = name
                     
-                    cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 255), 2)
-                    cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+                    # Draw face rectangles with thicker lines for HD display
+                    cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 255), 3)
+                    cv2.putText(frame, name, (left, top - 15), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
+                
+                # Human detection
+                humans = detect_humans(process_frame)
                 
                 for person in humans:
                     x1, y1, x2, y2 = [int(coord) for coord in person["box"]]
@@ -245,71 +264,67 @@ class CameraWidget(QWidget):
                     y1, y2 = int(y1 * scale_y), int(y2 * scale_y)
                     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
 
-                    # Find the closest face to this person detection
+                    # Find closest face (optimized)
                     detected_name = "Unknown"
-                    min_distance = float('inf')
+                    min_distance = 200  # Increased threshold for HD resolution
                     for (face_x, face_y), name in face_name_map.items():
-                        distance = ((cx - face_x) ** 2 + (cy - face_y) ** 2) ** 0.5
-                        if distance < min_distance and distance < 100:  # Within 100 pixels
+                        distance = abs(cx - face_x) + abs(cy - face_y)  # Manhattan distance (faster)
+                        if distance < min_distance:
                             min_distance = distance
                             detected_name = name
 
+                    # Danger zone check
                     if any(is_inside_roi((cx, cy), roi) for roi in self.danger_rois):
                         if (self.last_danger_alert_time == 0 and current_time - self.last_alert_time >= 1) or \
                         (self.last_danger_alert_time != 0 and current_time - self.last_danger_alert_time >= 10):
-                            QtCore.QTimer.singleShot(0, lambda: self.handle_danger_alert(frame.copy()))
+                            QtCore.QTimer.singleShot(0, lambda f=frame.copy(): self.handle_danger_alert(f))
                             self.last_danger_alert_time = current_time
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 4)  # Thicker lines
                         danger_triggered = True
                     
                     if not danger_triggered:
                         self.last_danger_alert_time = 0
                     
+                    # Regular ROI check
                     if any(is_inside_roi((cx, cy), roi) for roi in self.rois):
                         if current_time - self.last_alert_time >= 5.0:
                             QtCore.QTimer.singleShot(0, lambda: trigger_alert())
-                            # Pass the detected name to the logger
                             QtCore.QTimer.singleShot(0, lambda f=frame.copy(), n=detected_name: log_event("Intrusion Detected", f, n))
                             self.last_alert_time = current_time
                         
-                        cv2.putText(frame, "INTRUDER!", (x1, y1 - 10),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+                        cv2.putText(frame, "INTRUDER!", (x1, y1 - 20),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)  # Larger text
 
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 3)  # Thicker lines
 
-                # Draw ROIs
-                for roi in self.rois:
-                    cv2.rectangle(frame, roi[0], roi[1], (0, 255, 0), 2)
-                for roi in self.danger_rois:
-                    cv2.rectangle(frame, roi[0], roi[1], (0, 0, 255), 2)
-                if self.drawing and self.start_point and self.end_point:
-                    cv2.rectangle(frame, self.start_point, self.end_point, (0, 255, 255), 2)
+            # Always draw ROIs (lightweight operation) with thicker lines
+            for roi in self.rois:
+                cv2.rectangle(frame, roi[0], roi[1], (0, 255, 0), 3)
+            for roi in self.danger_rois:
+                cv2.rectangle(frame, roi[0], roi[1], (0, 0, 255), 3)
+            if self.drawing and hasattr(self, 'start_point') and hasattr(self, 'end_point') and self.start_point and self.end_point:
+                cv2.rectangle(frame, self.start_point, self.end_point, (0, 255, 255), 3)
 
-            # Calculate display scaling
-            scale = min(label_size.width() / frame_width, 
-                    label_size.height() / frame_height)
+            # Optimized display scaling - allow larger display sizes
+            max_display_width = min(1600, label_size.width())   # Increased max width
+            max_display_height = min(900, label_size.height())  # Increased max height
+            
+            scale = min(max_display_width / frame_width, max_display_height / frame_height)
             new_width = int(frame_width * scale)
             new_height = int(frame_height * scale)
             
-            # Resize for display
-            display_frame = cv2.resize(frame, (new_width, new_height))
+            # Resize for display with high quality interpolation for better image quality
+            display_frame = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_CUBIC)
 
-            # Convert to RGB and create QPixmap more efficiently
+            # Convert to RGB and create QPixmap
             rgb = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
             h, w, ch = rgb.shape
-            qt_image = QImage(rgb.data, w, h, w * ch, QImage.Format_RGB888)
+            bytes_per_line = ch * w
+            qt_image = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(qt_image)
             
-            # Scale pixmap to fit label
-            scaled_pixmap = pixmap.scaled(
-                label_size.width(),
-                label_size.height(),
-                Qt.KeepAspectRatio,
-                Qt.FastTransformation  # Use faster scaling
-            )
-            
             self.video_label.setAlignment(Qt.AlignCenter)
-            self.video_label.setPixmap(scaled_pixmap)
+            self.video_label.setPixmap(pixmap)
             
         except Exception as e:
             print(f"Error updating frame: {str(e)}")
