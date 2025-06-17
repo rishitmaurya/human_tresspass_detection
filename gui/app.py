@@ -8,6 +8,7 @@ from utils.logger import IMAGES_DIR
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
 from utils.email.dialog import EmailDialog
 from gui.add_faces_dialog import AddFacesDialog
+from gui.show_faces_dialog import ShowFacesDialog
 from datetime import datetime
 
 class CustomWebPage(QWebEnginePage):
@@ -141,8 +142,16 @@ class MainApp(QMainWindow):
         # Add Faces action
         add_faces_action = QAction("Add Faces", self)
         add_faces_action.setStatusTip("Add new faces to the recognition database")
-        add_faces_action.triggered.connect(self.show_add_faces_dialog)  # You need to implement this method
+        add_faces_action.triggered.connect(self.show_add_faces_dialog)
         file_menu.addAction(add_faces_action)
+        
+        # Show Added Faces action - NEW
+        show_faces_action = QAction("Show Added Faces", self)
+        show_faces_action.setStatusTip("View and manage known faces in the database")
+        show_faces_action.triggered.connect(self.show_faces_dialog)
+        file_menu.addAction(show_faces_action)
+        
+        file_menu.addSeparator()
         
         # Email action
         email_action = QAction("Send Email Report", self)
@@ -150,6 +159,8 @@ class MainApp(QMainWindow):
         email_action.triggered.connect(self.show_email_dialog)
         file_menu.addAction(email_action)
 
+        file_menu.addSeparator()
+        
         exit_action = QAction("Exit", self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
@@ -333,6 +344,18 @@ class MainApp(QMainWindow):
         
         if was_running:
             self.camera_widget.start()
+    
+    def show_faces_dialog(self):
+        """Show the faces management dialog - NEW METHOD"""
+        try:
+            dialog = ShowFacesDialog(self)
+            dialog.exec_()
+        except Exception as e:
+            QMessageBox.warning(
+                self, 
+                "Error", 
+                f"Could not open faces dialog: {str(e)}"
+            )
         
     def show_about_dialog(self):
         QMessageBox.information(
