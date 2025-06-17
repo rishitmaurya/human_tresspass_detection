@@ -99,30 +99,32 @@ class FaceCard(QFrame):
             self, 
             "Confirm Deletion",
             f"Are you sure you want to delete '{self.name}' from known faces?\n\n"
-            "This will remove all images and data for this person.",
+            "This will remove this image only.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
         
         if reply == QMessageBox.Yes:
             try:
-                # Remove the entire person's directory
-                person_dir = os.path.dirname(self.image_path)
-                if os.path.exists(person_dir):
-                    shutil.rmtree(person_dir)
+                # Delete only the specific image file
+                if os.path.exists(self.image_path):
+                    os.remove(self.image_path)
                 
-                # Update face recognizer (reload encodings)
-                face_recognizer = FaceRecognizer()
-                face_recognizer.load_known_faces()
+                    # Update face recognizer (reload encodings)
+                    face_recognizer = FaceRecognizer()
+                    face_recognizer.load_known_faces()
                 
-                QMessageBox.information(
-                    self, 
-                    "Success", 
-                    f"'{self.name}' has been deleted successfully!"
-                )
+                    QMessageBox.information(
+                        self, 
+                        "Success", 
+                        f"'{self.name}' image has been deleted successfully!"
+                    )
                 
-                # Refresh the parent dialog
-                self.parent_dialog.refresh_faces()
+                    # Refresh the parent dialog
+                    self.parent_dialog.refresh_faces()
+                
+                else:
+                    QMessageBox.warning(self, "Error", "Image not found.")
                 
             except Exception as e:
                 QMessageBox.critical(
@@ -255,13 +257,17 @@ class ShowFacesDialog(QDialog):
         for person_name in os.listdir(known_faces_dir):
             person_dir = os.path.join(known_faces_dir, person_name)
             if os.path.isdir(person_dir):
-                # Find the first image file in the person's directory
+                # Find all image files in the person's directory
                 image_files = [f for f in os.listdir(person_dir) 
                              if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp'))]
                 
-                if image_files:
-                    image_path = os.path.join(person_dir, image_files[0])
-                    face_card = FaceCard(person_name, image_path, self)
+                for image_file in image_files:
+                    image_path = os.path.join(person_dir, image_file)
+                    
+                    # Filter name to include only alphabetic characters
+                    filtered_name = ''.join(filter(str.isalpha, person_name))
+                    
+                    face_card = FaceCard(filtered_name, image_path, self)
                     face_cards.append(face_card)
         
         if not face_cards:
