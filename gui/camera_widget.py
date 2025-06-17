@@ -374,15 +374,40 @@ class CameraWidget(QWidget):
         ret, frame = self.cap.read()
         if not ret:
             return 0, 0
+            
         frame_height, frame_width = frame.shape[:2]
-        scale = min(label_size.width() / frame_width, label_size.height() / frame_height)
-        new_width = int(frame_width * scale)
-        new_height = int(frame_height * scale)
-        x_offset = (label_size.width() - new_width) // 2
-        y_offset = (label_size.height() - new_height) // 2
-
-        x = int(max(0, min(new_width - 1, pos.x() - x_offset)))
-        y = int(max(0, min(new_height - 1, pos.y() - y_offset)))
+        
+        # Calculate scale and offsets based on aspect ratio
+        target_ratio = frame_width / frame_height
+        label_ratio = label_size.width() / label_size.height()
+        
+        if label_ratio > target_ratio:
+            # Label is wider than video
+            scale = label_size.height() / frame_height
+            new_width = int(frame_width * scale)
+            new_height = label_size.height()
+            x_offset = (label_size.width() - new_width) // 2
+            y_offset = 0
+        else:
+            # Label is taller than video
+            scale = label_size.width() / frame_width
+            new_width = label_size.width()
+            new_height = int(frame_height * scale)
+            x_offset = 0
+            y_offset = (label_size.height() - new_height) // 2
+        
+        # Adjust click coordinates
+        x = pos.x() - x_offset
+        y = pos.y() - y_offset
+        
+        # Convert back to original frame coordinates
+        x = int((x / scale) if scale > 0 else 0)
+        y = int((y / scale) if scale > 0 else 0)
+        
+        # Ensure coordinates are within frame bounds
+        x = max(0, min(frame_width - 1, x))
+        y = max(0, min(frame_height - 1, y))
+        
         return x, y
     
     def clear_rois(self):
