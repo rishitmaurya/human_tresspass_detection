@@ -1,1 +1,1 @@
-{"sender": "sender@gmail.com", "password": "password", "receiver": "receiver@gmail.com"}
+{"sender": "sender@gmail.com", "password": "password", "receivers": {"receiver1": {"email": "receiver@gmail.com", "enabled": false}, "receiver2": {"email": "", "enabled": false}, "receiver3": {"email": "", "enabled": false}}}

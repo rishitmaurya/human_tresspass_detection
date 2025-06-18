@@ -2,7 +2,7 @@
 import cv2
 from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy, QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QCheckBox, QHBoxLayout
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen
-from PyQt5.QtCore import QTimer, Qt, QPoint, QEvent, QThread, pyqtSignal
+from PyQt5.QtCore import QTimer, Qt, QPoint, QEvent, QThread, pyqtSignal, pyqtSlot, QObject
 from detectors.yolo_detector import detect_humans
 from utils.geometry import is_inside_roi
 from utils.alert import trigger_alert
@@ -15,6 +15,97 @@ from time import time
 import json
 from detectors.face_recognizer import FaceRecognizer
 from PyQt5.QtCore import QThread, pyqtSignal
+
+
+
+import cv2
+import numpy as np
+from ultralytics import YOLO
+from queue import Queue
+from threading import Lock
+
+class DetectionManager(QObject):
+    detection_complete = pyqtSignal(object, object, object)  # frame, humans, faces
+    
+    def __init__(self):
+        super().__init__()
+        self.running = False
+        self.frame_queue = Queue(maxsize=1)  # Only keep latest frame
+        self.lock = Lock()
+        self.thread = None
+        
+        # Initialize models in the background
+        self.init_thread = QThread()
+        self.init_thread.run = self._initialize_models
+        self.init_thread.start()
+        
+    def _initialize_models(self):
+        try:
+            from detectors.face_recognizer import FaceRecognizer
+            self.model = YOLO(os.path.join("models", "yolov8n.pt"))
+            self.face_recognizer = FaceRecognizer()
+            self.model.predict(source=np.zeros((640, 640, 3), dtype=np.uint8))  # Warmup
+        except Exception as e:
+            print(f"Error initializing models: {e}")
+    
+    def start(self):
+        if not self.running:
+            self.running = True
+            self.thread = QThread()
+            self.thread.run = self._detection_loop
+            self.thread.start()
+    
+    def stop(self):
+        self.running = False
+        if self.thread:
+            self.thread.quit()
+            self.thread.wait()
+    
+    def process_frame(self, frame):
+        """Add new frame to queue, dropping old frame if necessary"""
+        if self.frame_queue.full():
+            try:
+                self.frame_queue.get_nowait()
+            except:
+                pass
+        try:
+            self.frame_queue.put_nowait(frame)
+        except:
+            pass
+            
+    def _detection_loop(self):
+        while self.running:
+            try:
+                frame = self.frame_queue.get(timeout=0.1)
+                if frame is None:
+                    continue
+                    
+                # Process at 640x360 resolution
+                process_frame = cv2.resize(frame, (640, 360))
+                
+                # Run YOLO detection
+                results = self.model.predict(source=process_frame, conf=0.4, classes=[0], verbose=False)
+                humans = []
+                if len(results) > 0:
+                    result = results[0]
+                    boxes = result.boxes
+                    if len(boxes) > 0:
+                        for box in boxes:
+                            # Get box coordinates
+                            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                            conf = float(box.conf[0].item())
+                            humans.append({
+                                "box": (x1, y1, x2, y2),
+                                "confidence": conf
+                            })
+                
+                # Run face recognition
+                face_results = self.face_recognizer.recognize_faces(process_frame)
+                
+                self.detection_complete.emit(frame, humans, face_results)
+                
+            except:
+                continue
 
 class DangerEmailThread(QThread):
     error_signal = pyqtSignal(str)
@@ -92,6 +183,13 @@ class CameraWidget(QWidget):
         self.last_alert_time = 0
         self.drawing_danger = False
         self.last_danger_alert_time = 0
+        self.detection_manager = DetectionManager()
+        self.detection_manager.detection_complete.connect(self.handle_detection_result)
+        self.last_processed_frame = None
+        self.last_detection_results = None
+        self.last_face_results = None
+        self.frame_count = 0
+        self.log_worker = None
         
         self.danger_mail_sender = "sender@gmail.com"
         self.danger_mail_password = "password"
@@ -142,6 +240,7 @@ class CameraWidget(QWidget):
             
             # self.frame_count = 0  # Add frame counter for processing
             self.detection_enabled = True
+            self.detection_manager.start()
             self.timer.start(33)  # ~30 FPS
             
         except Exception as e:
@@ -150,6 +249,7 @@ class CameraWidget(QWidget):
 
     def stop(self):
         if self.cap:
+            self.detection_manager.stop()
             self.timer.stop()
             self.detection_enabled = False
             self.roi = None
@@ -199,120 +299,165 @@ class CameraWidget(QWidget):
             if not ret:
                 return
                 
-            # Get current label size for proper scaling
-            label_size = self.video_label.size()
-            frame_height, frame_width = frame.shape[:2]
+            # Process detection every 3rd frame
+            self.frame_count += 1
+            if self.detection_enabled and self.frame_count % 3 == 0:
+                self.detection_manager.process_frame(frame.copy())
             
-            # Create smaller frame for processing (640x360)
-            process_frame = cv2.resize(frame, (640, 360))
-
-            # Detection on smaller frame
-            if self.detection_enabled:
-                humans = detect_humans(process_frame)
-                current_time = time()
-                danger_triggered = False
+            # Draw detections from last results
+            if self.last_detection_results is not None :
+                frame = self._draw_detections(frame)
                 
-                # Scale detection boxes back to original size
-                scale_x = frame_width / 640
-                scale_y = frame_height / 360
+            # Draw ROIs
+            frame = self._draw_rois(frame)
                 
-                # Face recognition on smaller frame
-                face_results = self.face_recognizer.recognize_faces(process_frame)
-                
-                # Create a mapping of face locations to names for quick lookup
-                face_name_map = {}
-                for result in face_results:
-                    name = result["name"]
-                    top, right, bottom, left = result["location"]
-                    # Scale face coordinates back
-                    left = int(left * scale_x)
-                    right = int(right * scale_x)
-                    top = int(top * scale_y)
-                    bottom = int(bottom * scale_y)
-                    
-                    # Store face center point and name
-                    face_center_x = (left + right) // 2
-                    face_center_y = (top + bottom) // 2
-                    face_name_map[(face_center_x, face_center_y)] = name
-                    
-                    cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 255), 2)
-                    cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-                
-                for person in humans:
-                    x1, y1, x2, y2 = [int(coord) for coord in person["box"]]
-                    # Scale coordinates back to original frame size
-                    x1, x2 = int(x1 * scale_x), int(x2 * scale_x)
-                    y1, y2 = int(y1 * scale_y), int(y2 * scale_y)
-                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-
-                    # Find the closest face to this person detection
-                    detected_name = "Unknown"
-                    min_distance = float('inf')
-                    for (face_x, face_y), name in face_name_map.items():
-                        distance = ((cx - face_x) ** 2 + (cy - face_y) ** 2) ** 0.5
-                        if distance < min_distance and distance < 100:  # Within 100 pixels
-                            min_distance = distance
-                            detected_name = name
-
-                    if any(is_inside_roi((cx, cy), roi) for roi in self.danger_rois):
-                        if (self.last_danger_alert_time == 0 and current_time - self.last_alert_time >= 1) or \
-                        (self.last_danger_alert_time != 0 and current_time - self.last_danger_alert_time >= 10):
-                            QtCore.QTimer.singleShot(0, lambda: self.handle_danger_alert(frame.copy()))
-                            self.last_danger_alert_time = current_time
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                        danger_triggered = True
-                    
-                    if not danger_triggered:
-                        self.last_danger_alert_time = 0
-                    
-                    if any(is_inside_roi((cx, cy), roi) for roi in self.rois):
-                        if current_time - self.last_alert_time >= 5.0:
-                            QtCore.QTimer.singleShot(0, lambda: trigger_alert())
-                            # Pass the detected name to the logger
-                            QtCore.QTimer.singleShot(0, lambda f=frame.copy(), n=detected_name: log_event("Intrusion Detected", f, n))
-                            self.last_alert_time = current_time
-                        
-                        cv2.putText(frame, "INTRUDER!", (x1, y1 - 10),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
-
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
-
-                # Draw ROIs
-                for roi in self.rois:
-                    cv2.rectangle(frame, roi[0], roi[1], (0, 255, 0), 2)
-                for roi in self.danger_rois:
-                    cv2.rectangle(frame, roi[0], roi[1], (0, 0, 255), 2)
-                if self.drawing and self.start_point and self.end_point:
-                    cv2.rectangle(frame, self.start_point, self.end_point, (0, 255, 255), 2)
-
-            # Calculate display scaling
-            scale = min(label_size.width() / frame_width, 
-                    label_size.height() / frame_height)
-            new_width = int(frame_width * scale)
-            new_height = int(frame_height * scale)
-            
-            # Resize for display
-            display_frame = cv2.resize(frame, (new_width, new_height))
-
-            # Convert to RGB and create QPixmap more efficiently
-            rgb = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
-            h, w, ch = rgb.shape
-            qt_image = QImage(rgb.data, w, h, w * ch, QImage.Format_RGB888)
-            pixmap = QPixmap.fromImage(qt_image)
-            
-            # Scale pixmap to fit label
-            scaled_pixmap = pixmap.scaled(
-                label_size.width(),
-                label_size.height(),
-                Qt.KeepAspectRatio,
-                Qt.FastTransformation  # Use faster scaling
-            )
-            
-            self.video_label.setAlignment(Qt.AlignCenter)
-            self.video_label.setPixmap(scaled_pixmap)
+            # Display frame
+            self._display_frame(frame)
             
         except Exception as e:
-            print(f"Error updating frame: {str(e)}")
+            print(f"Error in update_frame: {e}")
+
+    def _draw_detections(self, frame):
+        """Draw detection boxes and faces on frame"""
+        frame_height, frame_width = frame.shape[:2]
+        scale_x = frame_width / 640
+        scale_y = frame_height / 360
+        
+        # Draw faces
+        for face in self.last_face_results:
+            if not isinstance(face, dict) or "location" not in face or "name" not in face:
+                continue
+            top, right, bottom, left = face["location"]
+            # Scale coordinates correctly
+            top = int(top * scale_y)
+            bottom = int(bottom * scale_y)
+            left = int(left * scale_x)
+            right = int(right * scale_x)
+            cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 255), 2)
+            cv2.putText(frame, face["name"], (left, top - 10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+        
+        # Draw person detections
+        current_time = time()
+        if self.last_detection_results is not None:
+            for person in self.last_detection_results:
+                if not isinstance(person, dict) or "box" not in person:
+                    continue
+                box = person["box"]
+                if not isinstance(box, (tuple, list)) or len(box) != 4:
+                    continue
+                    
+                x1, y1, x2, y2 = box
+                x1 = int(float(x1) * scale_x)
+                x2 = int(float(x2) * scale_x)
+                y1 = int(float(y1) * scale_y)
+                y2 = int(float(y2) * scale_y)
+                
+                self._handle_person_detection(frame, (x1, y1, x2, y2), current_time)
+        
+        return frame
+    
+    def _draw_rois(self, frame):
+        """Draw warning and danger ROIs on the frame"""
+        # Draw warning zones (green)
+        for roi in self.rois:
+            (x1, y1), (x2, y2) = roi
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            
+        # Draw danger zones (red)
+        for roi in self.danger_rois:
+            (x1, y1), (x2, y2) = roi
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            
+        return frame
+
+    def _handle_person_detection(self, frame, box, current_time):
+        """Handle person detection and ROI intersection"""
+        x1, y1, x2, y2 = box
+        center_x = (x1 + x2) // 2
+        center_y = (y1 + y2) // 2
+        
+        # Get face name if any face is detected near this person
+        person_name = "Unknown"
+        if self.last_face_results:
+            for face in self.last_face_results:
+                if not isinstance(face, dict) or "location" not in face or "name" not in face:
+                    continue
+                    
+                # Get face coordinates and scale them properly
+                top, right, bottom, left = face["location"]
+                face_center_x = (left + right) // 2
+                face_center_y = (top + bottom) // 2
+                
+                # Check if face is near the person's position (within the box)
+                if (x1 <= face_center_x <= x2 and y1 <= face_center_y <= y2):
+                    person_name = face["name"]
+                    break
+        
+        # Check warning zones
+        for roi in self.rois:
+            (rx1, ry1), (rx2, ry2) = roi
+            if (rx1 <= center_x <= rx2 and ry1 <= center_y <= ry2):
+                # Person is in warning zone
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                # Add name label to the frame
+                cv2.putText(frame, f"Name: {person_name}", (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                
+                if current_time - self.last_alert_time > 5:  # 5 second cooldown
+                    self.last_alert_time = current_time
+                    # Trigger alert and log with person name
+                    trigger_alert()
+                    log_event("Warning Zone Intrusion", frame, person_name)
+                return True
+                
+        # Check danger zones
+        for roi in self.danger_rois:
+            (rx1, ry1), (rx2, ry2) = roi
+            if (rx1 <= center_x <= rx2 and ry1 <= center_y <= ry2):
+                # Person is in danger zone
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                # Add name label to the frame
+                cv2.putText(frame, f"Name: {person_name}", (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                
+                if current_time - self.last_danger_alert_time > 10:  # 10 second cooldown
+                    self.last_danger_alert_time = current_time
+                    # Handle danger alert with person name
+                    self.handle_danger_alert(frame)
+                    # Log danger event with person name
+                    log_event("Danger Zone Intrusion", frame, person_name)
+                return True
+        
+        # Not in any zone
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+        # Add name label to the frame
+        cv2.putText(frame, f"Name: {person_name}", (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
+        return False
+
+    def _display_frame(self, frame):
+        """Efficiently display frame on video label"""
+        label_size = self.video_label.size()
+        frame_height, frame_width = frame.shape[:2]
+        
+        # Calculate optimal display size
+        scale = min(label_size.width() / frame_width, 
+                    label_size.height() / frame_height)
+        new_width = int(frame_width * scale)
+        new_height = int(frame_height * scale)
+        
+        # Resize efficiently
+        display_frame = cv2.resize(frame, (new_width, new_height))
+        rgb = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
+        
+        # Create QImage without copying data
+        qt_image = QImage(rgb.data, new_width, new_height, 
+                        new_width * 3, QImage.Format_RGB888)
+        pixmap = QPixmap.fromImage(qt_image)
+        
+        self.video_label.setAlignment(Qt.AlignCenter)
+        self.video_label.setPixmap(pixmap)
             
     def mousePressEvent(self, event):
         if self.allow_drawing and not self.drawing and event.button() == Qt.LeftButton:
@@ -532,3 +677,9 @@ class CameraWidget(QWidget):
     def show_email_error(self, error_msg):
         from PyQt5.QtWidgets import QMessageBox
         QMessageBox.critical(self, "Danger Mail Error", f"Failed to send danger email:\n{error_msg}")
+        
+    def handle_detection_result(self, frame, humans, face_results):
+        """Handle detection results from detection manager"""
+        self.last_detection_results = humans
+        self.last_face_results = face_results
+        self.last_processed_frame = frame

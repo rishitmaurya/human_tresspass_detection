@@ -1,128 +1,75 @@
-from deepface import DeepFace
-import numpy as np
-import faiss
 import os
+from datetime import datetime
 import cv2
-from typing import Dict, List, Tuple, Optional
-import logging
+from PyQt5.QtCore import QObject, QThread, pyqtSignal
+from queue import Queue
+from threading import Lock
 
-# Set up logging
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
+LOG_FILE = os.path.join("logs", "alert_log.html")
+IMAGES_DIR = os.path.join("logs", "images")
+event_counter = 0
+log_lock = Lock()
 
-class FaceRecognizer:
-    def __init__(self, known_faces_dir: str = "known_faces"):
-        self.known_faces_dir = known_faces_dir
-        self.detector_backend = 'opencv'
-        self.model_name = "VGG-Face"
-        self.model = None
-        self.index = None
-        self.face_names = []
-        self.embeddings = []
-        
-        # Initialize model
-        try:
-            logger.info("Initializing face recognizer...")
-            self.model = DeepFace.build_model(self.model_name)
-            self.load_known_faces()
-            logger.info(f"Loaded {len(self.face_names)} known faces")
-        except Exception as e:
-            logger.error(f"Error initializing face recognizer: {str(e)}")
-
-    def _extract_embedding(self, embedding_result) -> np.ndarray:
-        """Extract embedding vector from DeepFace result"""
-        try:
-            if isinstance(embedding_result, list):
-                logger.debug("Embedding result is a list, taking first element")
-                embedding_result = embedding_result[0]
-            if isinstance(embedding_result, dict):
-                logger.debug("Extracting embedding from dict")
-                return np.array(embedding_result.get('embedding', []))
-            return np.array(embedding_result)
-        except Exception as e:
-            logger.error(f"Error extracting embedding: {str(e)}")
-            return np.array([])
-
-    def load_known_faces(self):
-        if not os.path.exists(self.known_faces_dir):
-            os.makedirs(self.known_faces_dir)
-            logger.warning(f"Created empty directory: {self.known_faces_dir}")
-            return
-
-        logger.info(f"Loading known faces from {self.known_faces_dir}")
-        for person_folder in os.listdir(self.known_faces_dir):
-            person_path = os.path.join(self.known_faces_dir, person_folder)
-            if os.path.isdir(person_path):
-                logger.debug(f"Processing person folder: {person_folder}")
-                for img_file in os.listdir(person_path):
-                    if img_file.lower().endswith(('.png', '.jpg', '.jpeg')):
-                        img_path = os.path.join(person_path, img_file)
-                        try:
-                            logger.debug(f"Processing image: {img_path}")
-                            embedding_result = DeepFace.represent(
-                                img_path=img_path,
-                                model_name=self.model_name,
-                                detector_backend=self.detector_backend,
-                                enforce_detection=False
-                            )
-                            embedding = self._extract_embedding(embedding_result)
-                            if embedding.size > 0:
-                                self.embeddings.append(embedding)
-                                self.face_names.append(person_folder)
-                                logger.debug(f"Successfully added face for {person_folder}")
-                        except Exception as e:
-                            logger.error(f"Error processing {img_path}: {str(e)}")
-
-        if self.embeddings:
-            logger.info(f"Building Faiss index with {len(self.embeddings)} embeddings")
-            embeddings_array = np.array(self.embeddings).astype('float32')
-            d = embeddings_array.shape[1]
-            self.index = faiss.IndexFlatL2(d)
-            self.index.add(embeddings_array)
-        else:
-            logger.warning("No valid embeddings found to build index")
-
-    def recognize_face(self, frame: np.ndarray, face_box: Tuple[int, int, int, int]) -> Optional[str]:
-        if self.index is None or not self.face_names:
-            logger.warning("Face recognition not initialized properly")
-            return None
-
-        try:
-            x1, y1, x2, y2 = face_box
-            face_img = frame[y1:y2, x1:x2]
-            
-            temp_path = "temp_face.jpg"
-            cv2.imwrite(temp_path, face_img)
-            logger.debug(f"Saved temporary face image: {temp_path}")
-            
-            logger.debug("Getting embedding for detected face")
-            embedding_result = DeepFace.represent(
-                img_path=temp_path,
-                model_name=self.model_name,
-                detector_backend=self.detector_backend,
-                enforce_detection=False
-            )
-            
-            os.remove(temp_path)
-            logger.debug("Removed temporary face image")
-            
-            embedding = self._extract_embedding(embedding_result)
-            if embedding.size == 0:
-                logger.warning("Got empty embedding for detected face")
-                return None
-
-            logger.debug("Searching for matching face")
-            D, I = self.index.search(np.array([embedding]).astype('float32'), 1)
-            
-            if D[0][0] < 100:
-                person_name = self.face_names[I[0][0]]
-                logger.info(f"Found match: {person_name} with distance {D[0][0]}")
-                return person_name
-            else:
-                logger.debug(f"No match found. Best distance was {D[0][0]}")
-            
-        except Exception as e:
-            logger.error(f"Error in face recognition: {str(e)}")
-        
-        return None
+class LogWorker(QThread):
+    finished = pyqtSignal()
     
+    def __init__(self):
+        super().__init__()
+        self.queue = Queue()
+        self.running = True
+        
+    def process_log(self, event, frame, person_name):
+        self.queue.put((event, frame.copy() if frame is not None else None, person_name))
+        
+    def run(self):
+        while self.running:
+            try:
+                event, frame, person_name = self.queue.get(timeout=0.1)
+                _write_log_entry(event, frame, person_name)
+                self.queue.task_done()
+            except Queue.Empty:
+                continue
+            except Exception as e:
+                print(f"Error in log worker: {str(e)}")
+                continue
+                
+    def stop(self):
+        self.running = False
+
+def _write_log_entry(event, frame=None, person_name=None):
+    """Internal function to write the log entry"""
+    global event_counter
+    
+    with log_lock:
+        event_counter += 1
+        
+        # Create directories if they don't exist
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+        os.makedirs(IMAGES_DIR, exist_ok=True)
+
+        timestamp = datetime.now()
+        date_str = timestamp.strftime("%Y-%m-%d")
+        time_str = timestamp.strftime("%H:%M:%S")
+
+        # Save image if provided
+        image_path = None
+        if frame is not None:
+            image_filename = f"intrusion_{event_counter}_{timestamp.strftime('%Y%m%d_%H%M%S')}.jpg"
+            image_path = os.path.join(IMAGES_DIR, image_filename)
+            cv2.imwrite(image_path, frame)
+
+        # Keep your existing HTML template and file handling code here
+        # ... (keep all the HTML and file handling code from the original logger.py)
+
+# Create global logger instance
+log_worker = LogWorker()
+log_worker.start()
+
+def log_event(event, frame=None, person_name=None):
+    """Thread-safe function to log events"""
+    log_worker.process_log(event, frame, person_name)
+
+# Cleanup function to be called when the application exits
+def cleanup():
+    log_worker.stop()
+    log_worker.wait()

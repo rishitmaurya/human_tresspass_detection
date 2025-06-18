@@ -356,6 +356,11 @@ class MainApp(QMainWindow):
                 "Error", 
                 f"Could not open faces dialog: {str(e)}"
             )
+            
+    def closeEvent(self, event):
+        from utils.logger import cleanup
+        cleanup()
+        super().closeEvent(event)
         
     def show_about_dialog(self):
         QMessageBox.information(
