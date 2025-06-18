@@ -1,75 +1,61 @@
-import os
-from datetime import datetime
-import cv2
-from PyQt5.QtCore import QObject, QThread, pyqtSignal
-from queue import Queue
-from threading import Lock
+# 1. First, modify the update_frame method:
+def update_frame(self):
+    if not self.cap or not self.cap.isOpened():
+        return
+        
+    try:
+        ret, frame = self.cap.read()
+        if not ret:
+            return
+            
+        # Process detection every 3rd frame
+        self.frame_count += 1
+        if self.detection_enabled and self.frame_count % 3 == 0:
+            self.detection_manager.process_frame(frame.copy())
+        
+        # Draw detections from last results
+        if self.last_detection_results is not None:
+            frame = self._draw_detections(frame)
+            
+        # Display frame directly (remove _draw_rois call)
+        self._display_frame(frame)
+        
+    except Exception as e:
+        print(f"Error in update_frame: {e}")
 
-LOG_FILE = os.path.join("logs", "alert_log.html")
-IMAGES_DIR = os.path.join("logs", "images")
-event_counter = 0
-log_lock = Lock()
-
-class LogWorker(QThread):
-    finished = pyqtSignal()
+# 2. Modify the paintEvent method:
+def paintEvent(self, event):
+    super().paintEvent(event)
+    if not hasattr(self, 'video_label'):
+        return
+        
+    painter = QPainter(self.video_label)
+    painter.begin(self.video_label)
     
-    def __init__(self):
-        super().__init__()
-        self.queue = Queue()
-        self.running = True
-        
-    def process_log(self, event, frame, person_name):
-        self.queue.put((event, frame.copy() if frame is not None else None, person_name))
-        
-    def run(self):
-        while self.running:
-            try:
-                event, frame, person_name = self.queue.get(timeout=0.1)
-                _write_log_entry(event, frame, person_name)
-                self.queue.task_done()
-            except Queue.Empty:
-                continue
-            except Exception as e:
-                print(f"Error in log worker: {str(e)}")
-                continue
-                
-    def stop(self):
-        self.running = False
-
-def _write_log_entry(event, frame=None, person_name=None):
-    """Internal function to write the log entry"""
-    global event_counter
+    # Draw normal ROIs in green
+    pen = QPen(Qt.green, 2, Qt.SolidLine)
+    painter.setPen(pen)
+    for roi in self.rois:
+        (x1, y1), (x2, y2) = roi
+        painter.drawRect(x1, y1, x2 - x1, y2 - y1)
     
-    with log_lock:
-        event_counter += 1
-        
-        # Create directories if they don't exist
-        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-        os.makedirs(IMAGES_DIR, exist_ok=True)
+    # Draw danger ROIs in red
+    pen = QPen(Qt.red, 2, Qt.SolidLine)
+    painter.setPen(pen)
+    for roi in self.danger_rois:
+        (x1, y1), (x2, y2) = roi
+        painter.drawRect(x1, y1, x2 - x1, y2 - y1)
+    
+    # Draw the current ROI being drawn
+    if self.current_roi:
+        x1, y1, x2, y2 = self.current_roi
+        pen = QPen(Qt.red if self.drawing_danger else Qt.green, 2, Qt.DashLine)
+        painter.setPen(pen)
+        painter.drawRect(min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1))
+    
+    painter.end()
 
-        timestamp = datetime.now()
-        date_str = timestamp.strftime("%Y-%m-%d")
-        time_str = timestamp.strftime("%H:%M:%S")
-
-        # Save image if provided
-        image_path = None
-        if frame is not None:
-            image_filename = f"intrusion_{event_counter}_{timestamp.strftime('%Y%m%d_%H%M%S')}.jpg"
-            image_path = os.path.join(IMAGES_DIR, image_filename)
-            cv2.imwrite(image_path, frame)
-
-        # Keep your existing HTML template and file handling code here
-        # ... (keep all the HTML and file handling code from the original logger.py)
-
-# Create global logger instance
-log_worker = LogWorker()
-log_worker.start()
-
-def log_event(event, frame=None, person_name=None):
-    """Thread-safe function to log events"""
-    log_worker.process_log(event, frame, person_name)
-
-# Cleanup function to be called when the application exits
-def cleanup():
-    log_worker.stop()
-    log_worker.wait()
+# 3. Remove or comment out the _draw_rois method since we're not using it anymore
+# def _draw_rois(self, frame):
+#     """Draw warning and danger ROIs on the frame"""
+#     ...

@@ -289,31 +289,47 @@ class CameraWidget(QWidget):
                 self.mouseReleaseEvent(event)
                 return True
         return super().eventFilter(source, event)
+    
+    def _draw_rois_on_frame(self, frame):
+        # Draw warning ROIs in green
+        for roi in self.rois:
+            (x1, y1), (x2, y2) = roi
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        # Draw danger ROIs in red
+        for roi in self.danger_rois:
+            (x1, y1), (x2, y2) = roi
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        # Draw current ROI being drawn
+        if self.current_roi:
+            x1, y1, x2, y2 = self.current_roi
+            color = (0, 0, 255) if self.drawing_danger else (0, 255, 0)
+            cv2.rectangle(frame, (min(x1, x2), min(y1, y2)), (max(x1, x2), max(y1, y2)), color, 2)
+        return frame
+    
 
     def update_frame(self):
         if not self.cap or not self.cap.isOpened():
             return
-            
         try:
             ret, frame = self.cap.read()
             if not ret:
                 return
-                
+
             # Process detection every 3rd frame
             self.frame_count += 1
             if self.detection_enabled and self.frame_count % 3 == 0:
                 self.detection_manager.process_frame(frame.copy())
-            
+
             # Draw detections from last results
-            if self.last_detection_results is not None :
+            if self.last_detection_results is not None:
                 frame = self._draw_detections(frame)
-                
-            # Draw ROIs
-            frame = self._draw_rois(frame)
-                
+
+            # Draw ROIs on the frame
+            frame = self._draw_rois_on_frame(frame)
+
             # Display frame
             self._display_frame(frame)
-            
+
         except Exception as e:
             print(f"Error in update_frame: {e}")
 
@@ -355,20 +371,6 @@ class CameraWidget(QWidget):
                 
                 self._handle_person_detection(frame, (x1, y1, x2, y2), current_time)
         
-        return frame
-    
-    def _draw_rois(self, frame):
-        """Draw warning and danger ROIs on the frame"""
-        # Draw warning zones (green)
-        for roi in self.rois:
-            (x1, y1), (x2, y2) = roi
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            
-        # Draw danger zones (red)
-        for roi in self.danger_rois:
-            (x1, y1), (x2, y2) = roi
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-            
         return frame
 
     def _handle_person_detection(self, frame, box, current_time):
@@ -460,57 +462,54 @@ class CameraWidget(QWidget):
         self.video_label.setPixmap(pixmap)
             
     def mousePressEvent(self, event):
-        if self.allow_drawing and not self.drawing and event.button() == Qt.LeftButton:
-            x, y = self.map_to_video(event.pos())
-            self.drawing = True
-            self.current_roi = [x, y, x, y]
+        if not self.allow_drawing:
+            return
+        if event.button() == Qt.LeftButton:
+            pos = self.video_label.mapFromParent(event.pos())
+            if self.video_label.rect().contains(pos):
+                x, y = self.map_to_video(pos)
+                self.drawing = True
+                self.current_roi = [x, y, x, y]
+                event.accept()
+                return
+        super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if self.allow_drawing and self.drawing and self.current_roi:
-            x, y = self.map_to_video(event.pos())
+        if not (self.allow_drawing and self.drawing and self.current_roi):
+            return
+        pos = self.video_label.mapFromParent(event.pos())
+        if self.video_label.rect().contains(pos):
+            x, y = self.map_to_video(pos)
             self.current_roi[2] = x
             self.current_roi[3] = y
             self.update()
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if self.allow_drawing and self.drawing and self.current_roi and event.button() == Qt.LeftButton:
-            x, y = self.map_to_video(event.pos())
-            self.current_roi[2] = x
-            self.current_roi[3] = y
-            x1, y1, x2, y2 = self.current_roi
-            roi_tuple = ((min(x1, x2), min(y1, y2)), (max(x1, x2), max(y1, y2)))
-            if self.drawing_danger:
-                self.danger_rois.append(roi_tuple)
-            else:
-                self.rois.append(roi_tuple)
-            self.current_roi = None
-            self.drawing = False
-            self.allow_drawing = False
-            self.drawing_danger = False
-            self.update()
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        painter = QPainter(self)
-        # Draw normal ROIs in green
-        pen = QPen(Qt.green, 2, Qt.SolidLine)
-        painter.setPen(pen)
-        for roi in self.rois:
-            (x1, y1), (x2, y2) = roi
-            painter.drawRect(x1, y1, x2 - x1, y2 - y1)
-        # Draw danger ROIs in red
-        pen = QPen(Qt.red, 2, Qt.SolidLine)
-        painter.setPen(pen)
-        for roi in self.danger_rois:
-            (x1, y1), (x2, y2) = roi
-            painter.drawRect(x1, y1, x2 - x1, y2 - y1)
-        # Draw the current ROI being drawn
-        if self.current_roi:
-            
-            x1, y1, x2, y2 = self.current_roi
-            pen = QPen(Qt.red if self.drawing_danger else Qt.green, 2, Qt.DashLine)
-            painter.setPen(pen)
-            painter.drawRect(min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1))
+        if not (self.allow_drawing and self.drawing and self.current_roi):
+            return
+        if event.button() == Qt.LeftButton:
+            pos = self.video_label.mapFromParent(event.pos())
+            if self.video_label.rect().contains(pos):
+                x, y = self.map_to_video(pos)
+                self.current_roi[2] = x
+                self.current_roi[3] = y
+                x1, y1, x2, y2 = self.current_roi
+                roi_tuple = ((min(x1, x2), min(y1, y2)), (max(x1, x2), max(y1, y2)))
+                if self.drawing_danger:
+                    self.danger_rois.append(roi_tuple)
+                else:
+                    self.rois.append(roi_tuple)
+                self.current_roi = None
+                self.drawing = False
+                self.allow_drawing = False
+                self.drawing_danger = False
+                self.update()
+                event.accept()
+                return
+        super().mouseReleaseEvent(event)
             
     def map_to_video(self, pos):
         label_size = self.video_label.size()
