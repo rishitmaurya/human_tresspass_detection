@@ -8,6 +8,7 @@ from utils.geometry import is_inside_roi
 from utils.alert import trigger_alert
 from utils.logger import log_event
 from PyQt5 import QtCore
+from PyQt5.QtWidgets import QMessageBox
 import os
 from datetime import datetime
 from utils.email.sender import UniversalEmailSender
@@ -318,7 +319,7 @@ class CameraWidget(QWidget):
 
             # Process detection every 3rd frame (but always draw latest results)
             self.frame_count += 1
-            if self.detection_enabled and self.frame_count % 3 == 0:
+            if self.detection_enabled and self.frame_count % 1 == 0:
                 self.detection_manager.process_frame(frame.copy())
 
             # Always draw faces and person detections (even if results are from previous frame)
@@ -573,7 +574,13 @@ class CameraWidget(QWidget):
         
     def handle_danger_alert(self, frame):
         from PyQt5.QtWidgets import QMessageBox
-        QMessageBox.critical(self, "Danger!", "Robot stopped")
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Critical)
+        msg.setWindowTitle("Danger!")
+        msg.setText("Robot stopped")
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.setModal(False)  # <-- This makes it non-blocking
+        msg.show()
         # Save current frame as image
         now = datetime.now()
         date_str = now.strftime("%Y-%m-%d")
@@ -662,7 +669,13 @@ class CameraWidget(QWidget):
         
         if not active_receivers:
             from PyQt5.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "Warning", "No active email receivers configured!")
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Warning)
+            msg.setWindowTitle("Warning")
+            msg.setText("No active email receivers configured!")
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.setModal(False)
+            msg.show()
             return
         
         self.email_thread = DangerEmailThread(
@@ -680,11 +693,23 @@ class CameraWidget(QWidget):
         
     def show_email_success(self):
         from PyQt5.QtWidgets import QMessageBox
-        QMessageBox.information(self, "Email Sent", "Danger alert email sent successfully!")
-        
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Information)
+        msg.setWindowTitle("Email Sent")
+        msg.setText("Danger alert email sent successfully!")
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.setModal(False)  # Non-blocking
+        msg.show()
+                
     def show_email_error(self, error_msg):
         from PyQt5.QtWidgets import QMessageBox
-        QMessageBox.critical(self, "Danger Mail Error", f"Failed to send danger email:\n{error_msg}")
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Critical)
+        msg.setWindowTitle("Danger Mail Error")
+        msg.setText(f"Failed to send danger email:\n{error_msg}")
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.setModal(False)  # Non-blocking
+        msg.show()
         
     def handle_detection_result(self, frame, humans, face_results):
         """Handle detection results from detection manager"""
