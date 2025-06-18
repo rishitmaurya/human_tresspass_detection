@@ -245,18 +245,20 @@ def _write_log_entry(event, frame=None, person_name=None):
         # Modified to insert new entries at the top
         with open(LOG_FILE, "r+", encoding='utf-8') as f:
             content = f.read()
-            table_start = content.find("<tr>\n                            <th")
+            # Find the position after the header row
+            table_start = content.find("<tr>")
             if table_start != -1:
-                # Find the position after the header row
                 insert_pos = content.find("</tr>", table_start) + 5
+                # Insert the new entry after the header
+                new_content = content[:insert_pos] + entry + content[insert_pos:]
                 # Update total count
                 old_count = int(content[content.find("Total Detections: ") + 17:].split("<")[0])
-                new_content = content[:insert_pos] + entry + content[insert_pos:]
                 new_content = new_content.replace(f"Total Detections: {old_count}", f"Total Detections: {event_counter}")
                 f.seek(0)
                 f.write(new_content)
                 f.truncate()
             else:
+                # If table not found, write a new table
                 f.seek(0, 2)
                 f.write(entry + "\n</table>\n</div>\n</body>\n</html>")
                 

@@ -13,6 +13,7 @@ from datetime import datetime
 from utils.email.sender import UniversalEmailSender
 from time import time
 import json
+import traceback
 from detectors.face_recognizer import FaceRecognizer
 from PyQt5.QtCore import QThread, pyqtSignal
 
@@ -104,7 +105,7 @@ class DetectionManager(QObject):
                 
                 self.detection_complete.emit(frame, humans, face_results)
                 
-            except:
+            except Exception as e:
                 continue
 
 class DangerEmailThread(QThread):
@@ -315,14 +316,13 @@ class CameraWidget(QWidget):
             if not ret:
                 return
 
-            # Process detection every 3rd frame
+            # Process detection every 3rd frame (but always draw latest results)
             self.frame_count += 1
             if self.detection_enabled and self.frame_count % 3 == 0:
                 self.detection_manager.process_frame(frame.copy())
 
-            # Draw detections from last results
-            if self.last_detection_results is not None:
-                frame = self._draw_detections(frame)
+            # Always draw faces and person detections (even if results are from previous frame)
+            frame = self._draw_detections(frame)
 
             # Draw ROIs on the frame
             frame = self._draw_rois_on_frame(frame)
@@ -334,108 +334,117 @@ class CameraWidget(QWidget):
             print(f"Error in update_frame: {e}")
 
     def _draw_detections(self, frame):
-        """Draw detection boxes and faces on frame"""
         frame_height, frame_width = frame.shape[:2]
         scale_x = frame_width / 640
         scale_y = frame_height / 360
-        
-        # Draw faces
-        for face in self.last_face_results:
+
+        # Draw faces (yellow)
+        for face in self.last_face_results or []:
             if not isinstance(face, dict) or "location" not in face or "name" not in face:
                 continue
             top, right, bottom, left = face["location"]
-            # Scale coordinates correctly
-            top = int(top * scale_y)
-            bottom = int(bottom * scale_y)
-            left = int(left * scale_x)
-            right = int(right * scale_x)
-            cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 255), 2)
-            cv2.putText(frame, face["name"], (left, top - 10), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-        
-        # Draw person detections
+            top_disp = int(top * scale_y)
+            bottom_disp = int(bottom * scale_y)
+            left_disp = int(left * scale_x)
+            right_disp = int(right * scale_x)
+            cv2.rectangle(frame, (left_disp, top_disp), (right_disp, bottom_disp), (0, 255, 255), 2)
+            cv2.putText(frame, face["name"], (left_disp, top_disp - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+
+        # Draw person detections (blue/green/red)
         current_time = time()
-        if self.last_detection_results is not None:
-            for person in self.last_detection_results:
-                if not isinstance(person, dict) or "box" not in person:
-                    continue
-                box = person["box"]
-                if not isinstance(box, (tuple, list)) or len(box) != 4:
-                    continue
-                    
-                x1, y1, x2, y2 = box
-                x1 = int(float(x1) * scale_x)
-                x2 = int(float(x2) * scale_x)
-                y1 = int(float(y1) * scale_y)
-                y2 = int(float(y2) * scale_y)
-                
-                self._handle_person_detection(frame, (x1, y1, x2, y2), current_time)
-        
+        for person in self.last_detection_results or []:
+            if not isinstance(person, dict) or "box" not in person:
+                continue
+            box = person["box"]
+            if not isinstance(box, (tuple, list)) or len(box) != 4:
+                continue
+
+            x1, y1, x2, y2 = box
+            x1_disp = int(float(x1) * scale_x)
+            x2_disp = int(float(x2) * scale_x)
+            y1_disp = int(float(y1) * scale_y)
+            y2_disp = int(float(y2) * scale_y)
+
+            # Pass original (unscaled) box for matching
+            self._handle_person_detection(frame, (x1_disp, y1_disp, x2_disp, y2_disp), current_time, (x1, y1, x2, y2))
+
         return frame
 
-    def _handle_person_detection(self, frame, box, current_time):
+    def _handle_person_detection(self, frame, box, current_time, original_box=None):
         """Handle person detection and ROI intersection"""
         x1, y1, x2, y2 = box
         center_x = (x1 + x2) // 2
         center_y = (y1 + y2) // 2
-        
-        # Get face name if any face is detected near this person
+
+        # Use original_box for matching (in 640x360 space)
+        if original_box is None:
+            original_box = box
+        ox1, oy1, ox2, oy2 = original_box
+        ocenter_x = (ox1 + ox2) // 2
+        ocenter_y = (oy1 + oy2) // 2
+
+        # Get face name if any face is detected near this person (in 640x360 space)
         person_name = "Unknown"
         if self.last_face_results:
             for face in self.last_face_results:
                 if not isinstance(face, dict) or "location" not in face or "name" not in face:
                     continue
-                    
-                # Get face coordinates and scale them properly
                 top, right, bottom, left = face["location"]
-                face_center_x = (left + right) // 2
-                face_center_y = (top + bottom) // 2
-                
-                # Check if face is near the person's position (within the box)
-                if (x1 <= face_center_x <= x2 and y1 <= face_center_y <= y2):
+                # Face box in (left, top, right, bottom) order for IoU
+                fx1, fy1, fx2, fy2 = left, top, right, bottom
+                px1, py1, px2, py2 = ox1, oy1, ox2, oy2
+
+                # Compute intersection
+                ix1 = max(px1, fx1)
+                iy1 = max(py1, fy1)
+                ix2 = min(px2, fx2)
+                iy2 = min(py2, fy2)
+                iw = max(0, ix2 - ix1)
+                ih = max(0, iy2 - iy1)
+                intersection = iw * ih
+                # Compute areas
+                person_area = (px2 - px1) * (py2 - py1)
+                face_area = (fx2 - fx1) * (fy2 - fy1)
+                union = person_area + face_area - intersection
+                iou = intersection / union if union > 0 else 0
+
+                if iou > 0.15:  # If overlap is significant, consider it a match
                     person_name = face["name"]
                     break
-        
+
         # Check warning zones
         for roi in self.rois:
             (rx1, ry1), (rx2, ry2) = roi
             if (rx1 <= center_x <= rx2 and ry1 <= center_y <= ry2):
                 # Person is in warning zone
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                # Add name label to the frame
+                # Add name label to the frame (only for green)
                 cv2.putText(frame, f"Name: {person_name}", (x1, y1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
                 if current_time - self.last_alert_time > 5:  # 5 second cooldown
                     self.last_alert_time = current_time
-                    # Trigger alert and log with person name
                     trigger_alert()
                     log_event("Warning Zone Intrusion", frame, person_name)
                 return True
-                
+
         # Check danger zones
         for roi in self.danger_rois:
             (rx1, ry1), (rx2, ry2) = roi
             if (rx1 <= center_x <= rx2 and ry1 <= center_y <= ry2):
                 # Person is in danger zone
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                # Add name label to the frame
+                # Add name label to the frame (only for red)
                 cv2.putText(frame, f"Name: {person_name}", (x1, y1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-                
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
                 if current_time - self.last_danger_alert_time > 10:  # 10 second cooldown
                     self.last_danger_alert_time = current_time
-                    # Handle danger alert with person name
                     self.handle_danger_alert(frame)
-                    # Log danger event with person name
                     log_event("Danger Zone Intrusion", frame, person_name)
                 return True
-        
-        # Not in any zone
+
+        # Not in any zone: draw blue box, NO name label
         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
-        # Add name label to the frame
-        cv2.putText(frame, f"Name: {person_name}", (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
         return False
 
     def _display_frame(self, frame):
