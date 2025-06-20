@@ -1,77 +1,47 @@
-with open(LOG_FILE, "w", encoding='utf-8') as f:
-    f.write("""
-    <html>
-    <head>
-        <style>
-            /* ... your existing styles ... */
-        </style>
-        <script>
-        let allRows = [];
-        let allDates = new Set();
+def _handle_person_detection(self, frame, box, current_time, original_box=None):
+    x1, y1, x2, y2 = box
+    center_x = (x1 + x2) // 2
+    center_y = (y1 + y2) // 2
 
-        window.onload = function() {
-            // Collect all rows and dates
-            allRows = Array.from(document.querySelectorAll("tbody tr[data-date]"));
-            allRows.forEach(row => allDates.add(row.getAttribute("data-date")));
-            populateDateDropdown();
-            filterLogs();
-        };
+    # ... face recognition code ...
 
-        function populateDateDropdown() {
-            const dateSelect = document.getElementById("dateSelect");
-            dateSelect.innerHTML = '<option value="all">All Dates</option>';
-            Array.from(allDates).sort().forEach(date => {
-                dateSelect.innerHTML += `<option value="${date}">${date}</option>`;
-            });
-        }
+    # 1. Check danger zones FIRST
+    for roi in self.danger_rois:
+        (rx1, ry1), (rx2, ry2) = roi
+        if (rx1 <= center_x <= rx2 and ry1 <= center_y <= ry2):
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            cv2.putText(frame, f"Name: {person_name}", (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+            if current_time - self.last_danger_alert_time > 10:
+                self.last_danger_alert_time = current_time
+                self.handle_danger_alert(frame)
+                log_event("Danger Zone Intrusion", frame, person_name)
+            return True
 
-        function filterLogs() {
-            const date = document.getElementById("dateSelect").value;
-            const search = document.getElementById("searchInput").value.toLowerCase();
-            allRows.forEach(row => {
-                const rowDate = row.getAttribute("data-date");
-                const rowText = row.innerText.toLowerCase();
-                let show = (date === "all" || rowDate === date);
-                if (search) {
-                    show = show && rowText.includes(search);
-                }
-                row.style.display = show ? "" : "none";
-            });
-        }
-        </script>
-    </head>
-    <body>
-        <div class="header">
-            <h2>Intrusion Detection Log</h2>
-            <span class="total-count">Total Detections: 0</span>
-            <label for="dateSelect" style="margin-left:2rem;">View by Date:</label>
-            <select id="dateSelect" onchange="filterLogs()" style="margin-right:2rem;"></select>
-            <input id="searchInput" type="text" placeholder="Search by date, time, name..." onkeyup="filterLogs()" style="padding:0.5rem; border-radius:4px; border:1px solid #ccc;">
-            <button class="download-btn" onclick="downloadData()">Download</button>
-        </div>
-        <script>
-        function showAlert() {
-            const alert = document.getElementById('successAlert');
-            alert.style.display = 'block';
-            setTimeout(() => {
-                alert.style.display = 'none';
-            }, 3000);
-        }
-        function downloadData() {
-            window.location.href = 'download://trigger';
-            return false;
-        }
-        </script>
-        <table>
-            <thead>
-            <tr>
-                <th>S.No</th>
-                <th>Date</th>
-                <th>Time</th>
-                <th>Event</th>
-                <th>Name</th>
-                <th>Evidence</th>
-            </tr>
-            </thead>
-            <tbody>
-    """)
+    # 2. Check authorization zones
+    for roi in getattr(self, "authorization_rois", []):
+        (rx1, ry1), (rx2, ry2) = roi
+        if (rx1 <= center_x <= rx2 and ry1 <= center_y <= ry2):
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
+            if person_name == "Unknown":
+                if current_time - self.last_authorization_alert_time > 10:
+                    self.last_authorization_alert_time = current_time
+                    log_event("Authorization Zone Intrusion (Unknown)", frame, person_name)
+            return True
+
+    # 3. Check warning zones
+    for roi in self.rois:
+        (rx1, ry1), (rx2, ry2) = roi
+        if (rx1 <= center_x <= rx2 and ry1 <= center_y <= ry2):
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(frame, f"Name: {person_name}", (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            if current_time - self.last_alert_time > 5:
+                self.last_alert_time = current_time
+                trigger_alert()
+                log_event("Warning Zone Intrusion", frame, person_name)
+            return True
+
+    # Not in any zone: draw blue box, NO name label
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+    return False

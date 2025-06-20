@@ -405,7 +405,6 @@ class CameraWidget(QWidget):
                 if not isinstance(face, dict) or "location" not in face or "name" not in face:
                     continue
                 top, right, bottom, left = face["location"]
-                # Face box in (left, top, right, bottom) order for IoU
                 fx1, fy1, fx2, fy2 = left, top, right, bottom
                 px1, py1, px2, py2 = ox1, oy1, ox2, oy2
 
@@ -417,62 +416,58 @@ class CameraWidget(QWidget):
                 iw = max(0, ix2 - ix1)
                 ih = max(0, iy2 - iy1)
                 intersection = iw * ih
-                # Compute areas
                 person_area = (px2 - px1) * (py2 - py1)
                 face_area = (fx2 - fx1) * (fy2 - fy1)
                 union = person_area + face_area - intersection
                 iou = intersection / union if union > 0 else 0
 
-                if iou > 0.15:  # If overlap is significant, consider it a match
+                if iou > 0.15:
                     person_name = face["name"]
                     break
 
-        # Check warning zones
-        for roi in self.rois:
+        in_any_zone = False
+
+        # 1. Check danger zones
+        for roi in self.danger_rois:
             (rx1, ry1), (rx2, ry2) = roi
             if (rx1 <= center_x <= rx2 and ry1 <= center_y <= ry2):
-                # Person is in warning zone
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                # Add name label to the frame (only for green)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
                 cv2.putText(frame, f"Name: {person_name}", (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                if current_time - self.last_alert_time > 5:  # 5 second cooldown
-                    self.last_alert_time = current_time
-                    trigger_alert()
-                    log_event("Warning Zone Intrusion", frame, person_name)
-                return True
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                if current_time - self.last_danger_alert_time > 10:
+                    self.last_danger_alert_time = current_time
+                    self.handle_danger_alert(frame)
+                    log_event("Danger Zone Intrusion", frame, person_name)
+                in_any_zone = True
 
-        # Check authorization zones
+        # 2. Check authorization zones
         for roi in getattr(self, "authorization_rois", []):
             (rx1, ry1), (rx2, ry2) = roi
             if (rx1 <= center_x <= rx2 and ry1 <= center_y <= ry2):
-                # Person is in authorization zone
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
-                # Only log if face is unknown
                 if person_name == "Unknown":
                     if current_time - self.last_authorization_alert_time > 10:
                         self.last_authorization_alert_time = current_time
                         log_event("Authorization Zone Intrusion (Unknown)", frame, person_name)
-                return True
-        
-        # Check danger zones
-        for roi in self.danger_rois:
+                in_any_zone = True
+
+        # 3. Check warning zones
+        for roi in self.rois:
             (rx1, ry1), (rx2, ry2) = roi
             if (rx1 <= center_x <= rx2 and ry1 <= center_y <= ry2):
-                # Person is in danger zone
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                # Add name label to the frame (only for red)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 cv2.putText(frame, f"Name: {person_name}", (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-                if current_time - self.last_danger_alert_time > 10:  # 10 second cooldown
-                    self.last_danger_alert_time = current_time
-                    self.handle_danger_alert(frame)
-                    log_event("Danger Zone Intrusion", frame, person_name)
-                return True
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                if current_time - self.last_alert_time > 5:
+                    self.last_alert_time = current_time
+                    trigger_alert()
+                    log_event("Warning Zone Intrusion", frame, person_name)
+                in_any_zone = True
 
-        # Not in any zone: draw blue box, NO name label
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
-        return False
+        # If not in any zone, draw blue box
+        if not in_any_zone:
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+        return in_any_zone
 
     def _display_frame(self, frame):
         """Efficiently display frame on video label"""
