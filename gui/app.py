@@ -1,8 +1,8 @@
 # app.py
-from PyQt5.QtWidgets import (QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout, 
+from PyQt5.QtWidgets import (QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout, QToolButton,
                             QWidget, QLabel, QSizePolicy, QAction, QMenuBar, QMessageBox, QFileDialog)
 from gui.camera_widget import CameraWidget
-from PyQt5.QtCore import Qt, QUrl
+from PyQt5.QtCore import Qt, QUrl, QSize
 import os
 from utils.logger import IMAGES_DIR
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
@@ -11,6 +11,9 @@ from gui.add_faces_dialog import AddFacesDialog
 from gui.show_faces_dialog import ShowFacesDialog
 from utils.logger import log_lock
 from datetime import datetime
+from PyQt5.QtWidgets import QToolButton
+from PyQt5.QtGui import QIcon, QPixmap
+from gui.alert_dialog import AlertLogDialog
 
 class CustomWebPage(QWebEnginePage):
     def __init__(self, parent, main_window):
@@ -71,10 +74,11 @@ class MainApp(QMainWindow):
             QMenuBar {
                 background-color: #1a237e;
                 color: white;
-                padding: 2px;
+                padding: 0px;
+                min-height: 28px;
             }
             QMenuBar::item {
-                padding: 8px 12px;
+                padding: 4px 10px;
                 margin: 0px;
             }
             QMenuBar::item:selected {
@@ -134,6 +138,32 @@ class MainApp(QMainWindow):
         self.setCentralWidget(container)
         
         self.create_menu()
+        
+        alert_btn = QToolButton(self)
+        alert_btn.setIcon(QIcon(os.path.abspath("assets/mark.png")))
+        alert_btn.setToolTip("View Alerts")
+        alert_btn.setIconSize(QSize(25, 25))
+        alert_btn.setStyleSheet("""
+            QToolButton {
+                background: #1a237e;
+                border: none;
+                margin-right: 24px;
+                margin-top: 0px;
+                margin-bottom: 0px;
+                padding: 4px;
+                border-radius: 20px;
+            }
+        """)
+        alert_btn.clicked.connect(self.show_alert_log_dialog)
+
+        # Use a QWidget with a layout to center the button vertically
+        corner_widget = QWidget()
+        corner_layout = QHBoxLayout()
+        corner_layout.setContentsMargins(0, 0, 16, 0)
+        corner_layout.setAlignment(Qt.AlignVCenter | Qt.AlignRight)
+        corner_widget.setLayout(corner_layout)
+        corner_layout.addWidget(alert_btn)
+        self.menubar.setCornerWidget(corner_widget, Qt.TopRightCorner)
 
     def create_menu(self):
 
@@ -365,6 +395,10 @@ class MainApp(QMainWindow):
                 "Error", 
                 f"Could not open faces dialog: {str(e)}"
             )
+            
+    def show_alert_log_dialog(self):
+        dialog = AlertLogDialog(self)
+        dialog.exec_()
             
     def closeEvent(self, event):
         from utils.logger import cleanup
