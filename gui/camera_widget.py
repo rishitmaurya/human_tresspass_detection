@@ -17,7 +17,7 @@ import json
 import traceback
 from detectors.face_recognizer import FaceRecognizer
 from PyQt5.QtCore import QThread, pyqtSignal
-
+from utils.alert_manager import AlertManager
 
 
 import cv2
@@ -438,6 +438,7 @@ class CameraWidget(QWidget):
                     self.last_danger_alert_time = current_time
                     self.handle_danger_alert(frame)
                     log_event("Danger Zone Intrusion", frame, person_name)
+                    AlertManager.instance().add_alert("Danger Zone Intrusion")
                 in_any_zone = True
 
         # 2. Check authorization zones
@@ -462,6 +463,7 @@ class CameraWidget(QWidget):
                     self.last_alert_time = current_time
                     trigger_alert()
                     log_event("Warning Zone Intrusion", frame, person_name)
+                    AlertManager.instance().add_alert("Warning Zone Intrusion")
                 in_any_zone = True
 
         # If not in any zone, draw blue box
@@ -612,6 +614,7 @@ class CameraWidget(QWidget):
         msg.setStandardButtons(QMessageBox.Ok)
         msg.setModal(False)  # <-- This makes it non-blocking
         msg.show()
+        AlertManager.instance().add_alert("Robot stopped (Danger Zone Intrusion)")
         # Save current frame as image
         now = datetime.now()
         date_str = now.strftime("%Y-%m-%d")
@@ -704,6 +707,7 @@ class CameraWidget(QWidget):
             msg.setIcon(QMessageBox.Warning)
             msg.setWindowTitle("Warning")
             msg.setText("No active email receivers configured!")
+            AlertManager.instance().add_alert("Warning (No active email receivers configured!)")
             msg.setStandardButtons(QMessageBox.Ok)
             msg.setModal(False)
             msg.show()
@@ -730,6 +734,7 @@ class CameraWidget(QWidget):
         msg.setText("Danger alert email sent successfully!")
         msg.setStandardButtons(QMessageBox.Ok)
         msg.setModal(False)  # Non-blocking
+        AlertManager.instance().add_alert("Danger alert email sent successfully!")
         msg.show()
                 
     def show_email_error(self, error_msg):
@@ -740,6 +745,7 @@ class CameraWidget(QWidget):
         msg.setText(f"Failed to send danger email:\n{error_msg}")
         msg.setStandardButtons(QMessageBox.Ok)
         msg.setModal(False)  # Non-blocking
+        AlertManager.instance().add_alert(f"Danger Mail Error ( Failed to send danger email:\n{error_msg})")
         msg.show()
         
     def handle_detection_result(self, frame, humans, face_results):
