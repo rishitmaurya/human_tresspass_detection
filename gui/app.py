@@ -181,6 +181,11 @@ class MainApp(QMainWindow):
     def add_draw_menu(self):
         if not self.draw_menu:
             self.draw_menu = self.menubar.addMenu("Draw")
+            auth_action = QAction("Draw Authorization Zone", self)
+            auth_action.setStatusTip("Draw a yellow authorization ROI")
+            auth_action.triggered.connect(self.camera_widget.enable_authorization_drawing)
+            self.draw_menu.addAction(auth_action)
+            
             draw_action = QAction("Draw Warning Zone", self)
             draw_action.triggered.connect(self.camera_widget.enable_drawing)
             self.draw_menu.addAction(draw_action)

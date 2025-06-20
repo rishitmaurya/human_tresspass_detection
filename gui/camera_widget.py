@@ -176,6 +176,8 @@ class CameraWidget(QWidget):
         
         self.rois = []
         self.danger_rois = []
+        self.authorization_rois = []
+        self.drawing_authorization = False
         self.current_roi = None  
         self.drawing = False
         self.allow_drawing = False
@@ -192,6 +194,7 @@ class CameraWidget(QWidget):
         self.last_face_results = None
         self.frame_count = 0
         self.log_worker = None
+        self.last_authorization_alert_time = 0
         
         self.danger_mail_sender = "sender@gmail.com"
         self.danger_mail_password = "password"
@@ -301,10 +304,20 @@ class CameraWidget(QWidget):
         for roi in self.danger_rois:
             (x1, y1), (x2, y2) = roi
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        # Draw authorization ROIs in yellow
+        for roi in getattr(self, "authorization_rois", []):
+            (x1, y1), (x2, y2) = roi
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
+            
         # Draw current ROI being drawn
         if self.current_roi:
             x1, y1, x2, y2 = self.current_roi
-            color = (0, 0, 255) if self.drawing_danger else (0, 255, 0)
+            if getattr(self, "drawing_authorization", False):
+                color = (0, 255, 255)
+            elif self.drawing_danger:
+                color = (0, 0, 255)
+            else:
+                color = (0, 255, 0)
             cv2.rectangle(frame, (min(x1, x2), min(y1, y2)), (max(x1, x2), max(y1, y2)), color, 2)
         return frame
     
@@ -429,6 +442,19 @@ class CameraWidget(QWidget):
                     log_event("Warning Zone Intrusion", frame, person_name)
                 return True
 
+        # Check authorization zones
+        for roi in getattr(self, "authorization_rois", []):
+            (rx1, ry1), (rx2, ry2) = roi
+            if (rx1 <= center_x <= rx2 and ry1 <= center_y <= ry2):
+                # Person is in authorization zone
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
+                # Only log if face is unknown
+                if person_name == "Unknown":
+                    if current_time - self.last_authorization_alert_time > 10:
+                        self.last_authorization_alert_time = current_time
+                        log_event("Authorization Zone Intrusion (Unknown)", frame, person_name)
+                return True
+        
         # Check danger zones
         for roi in self.danger_rois:
             (rx1, ry1), (rx2, ry2) = roi
@@ -508,7 +534,9 @@ class CameraWidget(QWidget):
                 self.current_roi[3] = y
                 x1, y1, x2, y2 = self.current_roi
                 roi_tuple = ((min(x1, x2), min(y1, y2)), (max(x1, x2), max(y1, y2)))
-                if self.drawing_danger:
+                if getattr(self, "drawing_authorization", False):
+                    self.authorization_rois.append(roi_tuple)
+                elif self.drawing_danger:
                     self.danger_rois.append(roi_tuple)
                 else:
                     self.rois.append(roi_tuple)
@@ -516,6 +544,7 @@ class CameraWidget(QWidget):
                 self.drawing = False
                 self.allow_drawing = False
                 self.drawing_danger = False
+                self.drawing_authorization = False
                 self.update()
                 event.accept()
                 return
@@ -571,6 +600,12 @@ class CameraWidget(QWidget):
         self.drawing = False
         self.allow_drawing = False
         self.update()
+        
+    def enable_authorization_drawing(self):
+        self.allow_drawing = True
+        self.drawing = False
+        self.drawing_danger = False
+        self.drawing_authorization = True
         
     def handle_danger_alert(self, frame):
         from PyQt5.QtWidgets import QMessageBox
