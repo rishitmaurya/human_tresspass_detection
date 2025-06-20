@@ -9,6 +9,7 @@ from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
 from utils.email.dialog import EmailDialog
 from gui.add_faces_dialog import AddFacesDialog
 from gui.show_faces_dialog import ShowFacesDialog
+from utils.logger import log_lock
 from datetime import datetime
 
 class CustomWebPage(QWebEnginePage):
@@ -214,27 +215,30 @@ class MainApp(QMainWindow):
         try:
             log_path = os.path.join("logs", "alert_log.html")
             if os.path.exists(log_path):
-                self.log_window = QWidget()
-                self.log_window.setWindowTitle("Intruders Log")
-                self.log_window.setGeometry(200, 200, 1000, 700)
-                self.log_window.setStyleSheet("""
-                    QWidget {
-                        background-color: #f0f2f5;
-                    }
-                """)
+                # Wait for logger to finish writing
+                from utils.logger import log_lock
+                with log_lock:
+                    self.log_window = QWidget()
+                    self.log_window.setWindowTitle("Intruders Log")
+                    self.log_window.setGeometry(200, 200, 1000, 700)
+                    self.log_window.setStyleSheet("""
+                        QWidget {
+                            background-color: #f0f2f5;
+                        }
+                    """)
 
-                # Create web view with custom page
-                web_view = QWebEngineView()
-                custom_page = CustomWebPage(web_view, self)
-                web_view.setPage(custom_page)
-                web_view.setUrl(QUrl.fromLocalFile(os.path.abspath(log_path)))
+                    # Create web view with custom page
+                    web_view = QWebEngineView()
+                    custom_page = CustomWebPage(web_view, self)
+                    web_view.setPage(custom_page)
+                    web_view.setUrl(QUrl.fromLocalFile(os.path.abspath(log_path)))
 
-                # Add padding around the web view
-                layout = QVBoxLayout()
-                layout.setContentsMargins(20, 20, 20, 20)
-                layout.addWidget(web_view)
-                self.log_window.setLayout(layout)
-                self.log_window.show()
+                    # Add padding around the web view
+                    layout = QVBoxLayout()
+                    layout.setContentsMargins(20, 20, 20, 20)
+                    layout.addWidget(web_view)
+                    self.log_window.setLayout(layout)
+                    self.log_window.show()
             else:
                 QMessageBox.information(self, "Intruders Log", "No intrusions detected yet.")
         except Exception as e:

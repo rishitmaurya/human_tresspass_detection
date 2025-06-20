@@ -596,6 +596,7 @@ class CameraWidget(QWidget):
     def clear_rois(self):
         self.rois.clear()
         self.danger_rois.clear()
+        self.authorization_rois.clear()
         self.current_roi = None
         self.drawing = False
         self.allow_drawing = False

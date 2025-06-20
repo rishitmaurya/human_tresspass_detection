@@ -1,70 +1,77 @@
-def _draw_detections(self, frame):
-    frame_height, frame_width = frame.shape[:2]
-    scale_x = frame_width / 640
-    scale_y = frame_height / 360
+with open(LOG_FILE, "w", encoding='utf-8') as f:
+    f.write("""
+    <html>
+    <head>
+        <style>
+            /* ... your existing styles ... */
+        </style>
+        <script>
+        let allRows = [];
+        let allDates = new Set();
 
-    # Draw faces
-    for face in self.last_face_results:
-        if not isinstance(face, dict) or "location" not in face or "name" not in face:
-            continue
-        top, right, bottom, left = face["location"]
-        # Scale coordinates for display
-        top_disp = int(top * scale_y)
-        bottom_disp = int(bottom * scale_y)
-        left_disp = int(left * scale_x)
-        right_disp = int(right * scale_x)
-        cv2.rectangle(frame, (left_disp, top_disp), (right_disp, bottom_disp), (0, 255, 255), 2)
-        cv2.putText(frame, face["name"], (left_disp, top_disp - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+        window.onload = function() {
+            // Collect all rows and dates
+            allRows = Array.from(document.querySelectorAll("tbody tr[data-date]"));
+            allRows.forEach(row => allDates.add(row.getAttribute("data-date")));
+            populateDateDropdown();
+            filterLogs();
+        };
 
-    # Draw person detections
-    current_time = time()
-    if self.last_detection_results is not None:
-        for person in self.last_detection_results:
-            if not isinstance(person, dict) or "box" not in person:
-                continue
-            box = person["box"]
-            if not isinstance(box, (tuple, list)) or len(box) != 4:
-                continue
+        function populateDateDropdown() {
+            const dateSelect = document.getElementById("dateSelect");
+            dateSelect.innerHTML = '<option value="all">All Dates</option>';
+            Array.from(allDates).sort().forEach(date => {
+                dateSelect.innerHTML += `<option value="${date}">${date}</option>`;
+            });
+        }
 
-            x1, y1, x2, y2 = box
-            # Scale for display
-            x1_disp = int(float(x1) * scale_x)
-            x2_disp = int(float(x2) * scale_x)
-            y1_disp = int(float(y1) * scale_y)
-            y2_disp = int(float(y2) * scale_y)
-
-            # Pass original (unscaled) box for matching
-            self._handle_person_detection(frame, (x1_disp, y1_disp, x2_disp, y2_disp), current_time, (x1, y1, x2, y2))
-
-    return frame
-
-def _handle_person_detection(self, frame, box, current_time, original_box=None):
-    """Handle person detection and ROI intersection"""
-    x1, y1, x2, y2 = box
-    center_x = (x1 + x2) // 2
-    center_y = (y1 + y2) // 2
-
-    # Use original_box for matching (in 640x360 space)
-    if original_box is None:
-        original_box = box
-    ox1, oy1, ox2, oy2 = original_box
-    ocenter_x = (ox1 + ox2) // 2
-    ocenter_y = (oy1 + oy2) // 2
-
-    # Get face name if any face is detected near this person (in 640x360 space)
-    person_name = "Unknown"
-    if self.last_face_results:
-        for face in self.last_face_results:
-            if not isinstance(face, dict) or "location" not in face or "name" not in face:
-                continue
-            top, right, bottom, left = face["location"]
-            face_center_x = (left + right) // 2
-            face_center_y = (top + bottom) // 2
-            # Match in 640x360 space
-            if (ox1 <= face_center_x <= ox2 and oy1 <= face_center_y <= oy2):
-                person_name = face["name"]
-                break
-
-    # ... rest of your code (unchanged) ...
-    # (draw green/red/blue boxes and log as before)
+        function filterLogs() {
+            const date = document.getElementById("dateSelect").value;
+            const search = document.getElementById("searchInput").value.toLowerCase();
+            allRows.forEach(row => {
+                const rowDate = row.getAttribute("data-date");
+                const rowText = row.innerText.toLowerCase();
+                let show = (date === "all" || rowDate === date);
+                if (search) {
+                    show = show && rowText.includes(search);
+                }
+                row.style.display = show ? "" : "none";
+            });
+        }
+        </script>
+    </head>
+    <body>
+        <div class="header">
+            <h2>Intrusion Detection Log</h2>
+            <span class="total-count">Total Detections: 0</span>
+            <label for="dateSelect" style="margin-left:2rem;">View by Date:</label>
+            <select id="dateSelect" onchange="filterLogs()" style="margin-right:2rem;"></select>
+            <input id="searchInput" type="text" placeholder="Search by date, time, name..." onkeyup="filterLogs()" style="padding:0.5rem; border-radius:4px; border:1px solid #ccc;">
+            <button class="download-btn" onclick="downloadData()">Download</button>
+        </div>
+        <script>
+        function showAlert() {
+            const alert = document.getElementById('successAlert');
+            alert.style.display = 'block';
+            setTimeout(() => {
+                alert.style.display = 'none';
+            }, 3000);
+        }
+        function downloadData() {
+            window.location.href = 'download://trigger';
+            return false;
+        }
+        </script>
+        <table>
+            <thead>
+            <tr>
+                <th>S.No</th>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Event</th>
+                <th>Name</th>
+                <th>Evidence</th>
+            </tr>
+            </thead>
+            <tbody>
+    """)

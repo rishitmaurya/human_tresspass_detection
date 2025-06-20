@@ -192,40 +192,83 @@ def _write_log_entry(event, frame=None, person_name=None):
                             .image-cell img { max-width: 200px; }
                         }
                     </style>
+                    <script>
+                    function populateDateDropdown() {
+                        // Always recalculate allDates from current rows
+                        let allDates = new Set();
+                        let allRows = Array.from(document.querySelectorAll("tbody tr[data-date]"));
+                        allRows.forEach(row => allDates.add(row.getAttribute("data-date")));
+                        const dateSelect = document.getElementById("dateSelect");
+                        dateSelect.innerHTML = '<option value="all">All Dates</option>';
+                        Array.from(allDates).sort().forEach(date => {
+                            dateSelect.innerHTML += `<option value="${date}">${date}</option>`;
+                        });
+                    }
+
+                    function filterLogs() {
+                        // Always get the latest rows
+                        let allRows = Array.from(document.querySelectorAll("tbody tr[data-date]"));
+                        const date = document.getElementById("dateSelect").value;
+                        const search = document.getElementById("searchInput").value.toLowerCase();
+                        allRows.forEach(row => {
+                            const rowDate = row.getAttribute("data-date");
+                            const rowText = row.innerText.toLowerCase();
+                            let show = (date === "all" || rowDate === date);
+                            if (search) {
+                                show = show && rowText.includes(search);
+                            }
+                            row.style.display = show ? "" : "none";
+                        });
+                    }
+
+                    // On page load, populate dropdown and filter
+                    window.onload = function() {
+                        populateDateDropdown();
+                        filterLogs();
+                        // Add Enter key support for search
+                        document.getElementById("searchInput").addEventListener("keyup", function(event) {
+                            if (event.key === "Enter") {
+                                filterLogs();
+                            }
+                        });
+                    };
+                    </script>
                 </head>
-                
                 <body>
-                    <div class="alert" id="successAlert">CSV Downloaded Successfully!</div>
-                    <div class="container">
-                        <div class="header">
-                            <h2>Intrusion Detection Log</h2>
-                            <span class="total-count">Total Detections: 0</span>
-                            <button class="download-btn" onclick="downloadData()">Download</button>
-                        </div>
-                        <script>
-                        function showAlert() {
-                            const alert = document.getElementById('successAlert');
-                            alert.style.display = 'block';
-                            setTimeout(() => {
-                                alert.style.display = 'none';
-                            }, 3000);
-                        }
-                        function downloadData() {
-                            // Use QtWebChannel to communicate with Python
-                            window.location.href = 'download://trigger';
-                            return false;
-                        }
-                        
-                        </script>
-                        <table>
-                            <tr>
-                                <th>S.No</th>
-                                <th>Date</th>
-                                <th>Time</th>
-                                <th>Event</th>
-                                <th>Name</th>
-                                <th>Evidence</th>
-                            </tr>
+                    <div class="header">
+                        <h2>Intrusion Detection Log</h2>
+                        <span class="total-count">Total Detections: 0</span>
+                        <label for="dateSelect" style="margin-left:2rem;">View by Date:</label>
+                        <select id="dateSelect" onchange="filterLogs()" style="margin-right:2rem;"></select>
+                        <input id="searchInput" type="text" placeholder="Search by date, time, name..." style="padding:0.5rem; border-radius:4px; border:1px solid #ccc;">
+                        <button type="button" class="download-btn" onclick="filterLogs()">Search</button>
+                        <button class="download-btn" onclick="downloadData()">Download</button>
+                    </div>
+                    <script>
+                    function showAlert() {
+                        const alert = document.getElementById('successAlert');
+                        alert.style.display = 'block';
+                        setTimeout(() => {
+                            alert.style.display = 'none';
+                        }, 3000);
+                    }
+                    function downloadData() {
+                        window.location.href = 'download://trigger';
+                        return false;
+                    }
+                    </script>
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>S.No</th>
+                            <th>Date</th>
+                            <th>Time</th>
+                            <th>Event</th>
+                            <th>Name</th>
+                            <th>Evidence</th>
+                        </tr>
+                        </thead>
+                        <tbody>
                 """)
 
         # Create new entry (to be inserted at the top)
@@ -233,7 +276,7 @@ def _write_log_entry(event, frame=None, person_name=None):
         name_class = "person-name" if person_name and person_name != "Unknown" else "person-name unknown"
         
         entry = f"""
-        <tr>
+        <tr data-date="{date_str}">
             <td class="serial">{event_counter}</td>
             <td class="timestamp">{date_str}</td>
             <td class="timestamp">{time_str}</td>
@@ -242,14 +285,12 @@ def _write_log_entry(event, frame=None, person_name=None):
             <td class="image-cell">{"<img src='images/" + os.path.basename(image_path) + "'>" if image_path else "No image"}</td>
         </tr>"""
 
-        # Modified to insert new entries at the top
+        # Insert new entry at the top of <tbody>
         with open(LOG_FILE, "r+", encoding='utf-8') as f:
             content = f.read()
-            # Find the position after the header row
-            table_start = content.find("<tr>")
-            if table_start != -1:
-                insert_pos = content.find("</tr>", table_start) + 5
-                # Insert the new entry after the header
+            tbody_start = content.find("<tbody>")
+            if tbody_start != -1:
+                insert_pos = tbody_start + len("<tbody>")
                 new_content = content[:insert_pos] + entry + content[insert_pos:]
                 # Update total count
                 old_count = int(content[content.find("Total Detections: ") + 17:].split("<")[0])
@@ -258,9 +299,9 @@ def _write_log_entry(event, frame=None, person_name=None):
                 f.write(new_content)
                 f.truncate()
             else:
-                # If table not found, write a new table
+                # If <tbody> not found, fallback to old method
                 f.seek(0, 2)
-                f.write(entry + "\n</table>\n</div>\n</body>\n</html>")
+                f.write(entry + "\n</tbody>\n</table>\n</div>\n</body>\n</html>")
                 
 # Create global logger instance
 log_worker = LogWorker()
