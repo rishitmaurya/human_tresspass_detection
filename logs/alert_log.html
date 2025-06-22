@@ -130,39 +130,54 @@
                         }
                     </style>
                     <script>
-                    function populateDateDropdown() {
-                        // Always recalculate allDates from current rows
-                        let allDates = new Set();
-                        let allRows = Array.from(document.querySelectorAll("tbody tr[data-date]"));
-                        allRows.forEach(row => allDates.add(row.getAttribute("data-date")));
-                        const dateSelect = document.getElementById("dateSelect");
-                        dateSelect.innerHTML = '<option value="all">All Dates</option>';
-                        Array.from(allDates).sort().forEach(date => {
-                            dateSelect.innerHTML += `<option value="${date}">${date}</option>`;
-                        });
-                    }
 
                     function filterLogs() {
-                        // Always get the latest rows
                         let allRows = Array.from(document.querySelectorAll("tbody tr[data-date]"));
-                        const date = document.getElementById("dateSelect").value;
+                        const selectedDate = document.getElementById("datePicker").value; // format: YYYY-MM-DD
                         const search = document.getElementById("searchInput").value.toLowerCase();
+                        let anyVisible = false;
+
                         allRows.forEach(row => {
                             const rowDate = row.getAttribute("data-date");
                             const rowText = row.innerText.toLowerCase();
-                            let show = (date === "all" || rowDate === date);
+                            let show = true;
+
+                            if (selectedDate) {
+                                show = (rowDate === selectedDate);
+                            }
+
                             if (search) {
                                 show = show && rowText.includes(search);
                             }
+
                             row.style.display = show ? "" : "none";
+                            if (show) anyVisible = true;
                         });
+
+                        // Show "No data available" row if no rows visible
+                        let noDataRow = document.getElementById("noDataRow");
+                        if (!anyVisible) {
+                            if (!noDataRow) {
+                                noDataRow = document.createElement("tr");
+                                noDataRow.id = "noDataRow";
+                                noDataRow.innerHTML = `<td colspan="6" style="text-align:center; padding:1rem; color:#666;">No data available for the chosen date.</td>`;
+                                document.querySelector("tbody").appendChild(noDataRow);
+                            }
+                        } else {
+                            if (noDataRow) {
+                                noDataRow.remove();
+                            }
+                        }
                     }
 
-                    // On page load, populate dropdown and filter
-                    window.onload = function() {
-                        populateDateDropdown();
+                    function clearDateFilter() {
+                        document.getElementById("datePicker").value = "";
                         filterLogs();
-                        // Add Enter key support for search
+                    }
+
+                    // On page load, just call filterLogs (no need to populate dropdown)
+                    window.onload = function() {
+                        filterLogs();
                         document.getElementById("searchInput").addEventListener("keyup", function(event) {
                             if (event.key === "Enter") {
                                 filterLogs();
@@ -174,9 +189,10 @@
                 <body>
                     <div class="header">
                         <h2>Intrusion Detection Log</h2>
-                        <span class="total-count">Total Detections: 2</span>
-                        <label for="dateSelect" style="margin-left:2rem;">View by Date:</label>
-                        <select id="dateSelect" onchange="filterLogs()" style="margin-right:2rem;"></select>
+                        <span class="total-count">Total Detections: 1</span>
+                        <label for="datePicker" style="margin-left:2rem;">Select Date:</label>
+                        <input type="date" id="datePicker" onchange="filterLogs()" style="margin-right:1rem; padding:0.3rem; border-radius:4px; border:1px solid #ccc;">
+                        <button type="button" class="download-btn" onclick="clearDateFilter()">Clear Date</button>
                         <input id="searchInput" type="text" placeholder="Search by date, time, name..." style="padding:0.5rem; border-radius:4px; border:1px solid #ccc;">
                         <button type="button" class="download-btn" onclick="filterLogs()">Search</button>
                         <button class="download-btn" onclick="downloadData()">Download</button>
@@ -206,28 +222,12 @@
                         </tr>
                         </thead>
                         <tbody>
-        <tr data-date="2025-06-20">
-            <td class="serial">2</td>
-            <td class="timestamp">2025-06-20</td>
-            <td class="timestamp">15:54:18</td>
-            <td class="event-text">Warning Zone Intrusion</td>
-            <td class="person-name unknown">Unknown</td>
-            <td class="image-cell"><img src='images/intrusion_2_20250620_155418.jpg'></td>
-        </tr>
-        <tr data-date="2025-06-20">
+        <tr data-date="2025-06-22">
             <td class="serial">1</td>
-            <td class="timestamp">2025-06-20</td>
-            <td class="timestamp">15:54:12</td>
+            <td class="timestamp">2025-06-22</td>
+            <td class="timestamp">18:25:54</td>
             <td class="event-text">Warning Zone Intrusion</td>
-            <td class="person-name unknown">Unknown</td>
-            <td class="image-cell"><img src='images/intrusion_1_20250620_155412.jpg'></td>
-        </tr>
-        <tr data-date="2025-06-20">
-            <td class="serial">1</td>
-            <td class="timestamp">2025-06-20</td>
-            <td class="timestamp">14:51:11</td>
-            <td class="event-text">Authorization Zone Intrusion (Unknown)</td>
-            <td class="person-name unknown">Unknown</td>
-            <td class="image-cell"><img src='images/intrusion_1_20250620_145111.jpg'></td>
+            <td class="person-name">rishit</td>
+            <td class="image-cell"><img src='images/intrusion_1_20250622_182554.jpg'></td>
         </tr>
                 

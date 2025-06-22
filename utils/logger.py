@@ -193,39 +193,54 @@ def _write_log_entry(event, frame=None, person_name=None):
                         }
                     </style>
                     <script>
-                    function populateDateDropdown() {
-                        // Always recalculate allDates from current rows
-                        let allDates = new Set();
-                        let allRows = Array.from(document.querySelectorAll("tbody tr[data-date]"));
-                        allRows.forEach(row => allDates.add(row.getAttribute("data-date")));
-                        const dateSelect = document.getElementById("dateSelect");
-                        dateSelect.innerHTML = '<option value="all">All Dates</option>';
-                        Array.from(allDates).sort().forEach(date => {
-                            dateSelect.innerHTML += `<option value="${date}">${date}</option>`;
-                        });
-                    }
 
                     function filterLogs() {
-                        // Always get the latest rows
                         let allRows = Array.from(document.querySelectorAll("tbody tr[data-date]"));
-                        const date = document.getElementById("dateSelect").value;
+                        const selectedDate = document.getElementById("datePicker").value; // format: YYYY-MM-DD
                         const search = document.getElementById("searchInput").value.toLowerCase();
+                        let anyVisible = false;
+
                         allRows.forEach(row => {
                             const rowDate = row.getAttribute("data-date");
                             const rowText = row.innerText.toLowerCase();
-                            let show = (date === "all" || rowDate === date);
+                            let show = true;
+
+                            if (selectedDate) {
+                                show = (rowDate === selectedDate);
+                            }
+
                             if (search) {
                                 show = show && rowText.includes(search);
                             }
+
                             row.style.display = show ? "" : "none";
+                            if (show) anyVisible = true;
                         });
+
+                        // Show "No data available" row if no rows visible
+                        let noDataRow = document.getElementById("noDataRow");
+                        if (!anyVisible) {
+                            if (!noDataRow) {
+                                noDataRow = document.createElement("tr");
+                                noDataRow.id = "noDataRow";
+                                noDataRow.innerHTML = `<td colspan="6" style="text-align:center; padding:1rem; color:#666;">No data available for the chosen date.</td>`;
+                                document.querySelector("tbody").appendChild(noDataRow);
+                            }
+                        } else {
+                            if (noDataRow) {
+                                noDataRow.remove();
+                            }
+                        }
                     }
 
-                    // On page load, populate dropdown and filter
-                    window.onload = function() {
-                        populateDateDropdown();
+                    function clearDateFilter() {
+                        document.getElementById("datePicker").value = "";
                         filterLogs();
-                        // Add Enter key support for search
+                    }
+
+                    // On page load, just call filterLogs (no need to populate dropdown)
+                    window.onload = function() {
+                        filterLogs();
                         document.getElementById("searchInput").addEventListener("keyup", function(event) {
                             if (event.key === "Enter") {
                                 filterLogs();
@@ -238,8 +253,9 @@ def _write_log_entry(event, frame=None, person_name=None):
                     <div class="header">
                         <h2>Intrusion Detection Log</h2>
                         <span class="total-count">Total Detections: 0</span>
-                        <label for="dateSelect" style="margin-left:2rem;">View by Date:</label>
-                        <select id="dateSelect" onchange="filterLogs()" style="margin-right:2rem;"></select>
+                        <label for="datePicker" style="margin-left:2rem;">Select Date:</label>
+                        <input type="date" id="datePicker" onchange="filterLogs()" style="margin-right:1rem; padding:0.3rem; border-radius:4px; border:1px solid #ccc;">
+                        <button type="button" class="download-btn" onclick="clearDateFilter()">Clear Date</button>
                         <input id="searchInput" type="text" placeholder="Search by date, time, name..." style="padding:0.5rem; border-radius:4px; border:1px solid #ccc;">
                         <button type="button" class="download-btn" onclick="filterLogs()">Search</button>
                         <button class="download-btn" onclick="downloadData()">Download</button>
