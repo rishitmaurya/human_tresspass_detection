@@ -35,6 +35,7 @@ class DetectionManager(QObject):
         self.frame_queue = Queue(maxsize=1)  # Only keep latest frame
         self.lock = Lock()
         self.thread = None
+        self.face_recognition_enabled = True
         
         # Initialize models in the background
         self.init_thread = QThread()
@@ -62,6 +63,9 @@ class DetectionManager(QObject):
         if self.thread:
             self.thread.quit()
             self.thread.wait()
+            
+    def set_face_recognition_enabled(self, enabled: bool):
+        self.face_recognition_enabled = enabled
     
     def process_frame(self, frame):
         """Add new frame to queue, dropping old frame if necessary"""
@@ -102,7 +106,9 @@ class DetectionManager(QObject):
                             })
                 
                 # Run face recognition
-                face_results = self.face_recognizer.recognize_faces(process_frame)
+                face_results = []
+                if self.face_recognition_enabled:
+                    face_results = self.face_recognizer.recognize_faces(process_frame)
                 
                 self.detection_complete.emit(frame, humans, face_results)
                 
@@ -195,6 +201,8 @@ class CameraWidget(QWidget):
         self.frame_count = 0
         self.log_worker = None
         self.last_authorization_alert_time = 0
+        self.face_recognition_enabled = True
+
         
         self.danger_mail_sender = "sender@gmail.com"
         self.danger_mail_password = "password"

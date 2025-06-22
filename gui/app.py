@@ -1,5 +1,5 @@
 # app.py
-from PyQt5.QtWidgets import (QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout, QToolButton,
+from PyQt5.QtWidgets import (QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout, QToolButton, QMenu,
                             QWidget, QLabel, QSizePolicy, QAction, QMenuBar, QMessageBox, QFileDialog)
 from gui.camera_widget import CameraWidget
 from PyQt5.QtCore import Qt, QUrl, QSize
@@ -164,6 +164,42 @@ class MainApp(QMainWindow):
         corner_widget.setLayout(corner_layout)
         corner_layout.addWidget(alert_btn)
         self.menubar.setCornerWidget(corner_widget, Qt.TopRightCorner)
+        
+        # Create Settings menu on right side
+        self.settings_menu = QMenu("Settings", self)
+
+        # Add actions to settings_menu as before
+        self.disable_face_action = QAction("Disable Face Recognition", self)
+        self.disable_face_action.setCheckable(True)
+        self.disable_face_action.setStatusTip("Toggle face recognition on/off")
+        self.disable_face_action.triggered.connect(self.toggle_face_recognition)
+        self.settings_menu.addAction(self.disable_face_action)
+
+        # Create a QToolButton to show the settings menu
+        settings_btn = QToolButton(self)
+        settings_btn.setText("Settings")
+        settings_btn.setPopupMode(QToolButton.InstantPopup)
+        settings_btn.setMenu(self.settings_menu)
+        settings_btn.setStyleSheet("""
+            QToolButton {
+                color: white;
+                background: #1a237e;
+                border: none;
+                padding: 4px 12px;
+                border-radius: 4px;
+                font-size: 14px;
+            }
+            QToolButton::menu-indicator {
+                image: none;
+            }
+            QToolButton:hover {
+                background: #283593;
+            }
+        """)
+        settings_btn.setFixedHeight(28)
+
+        # Add the settings button to the corner widget layout, before the alert button
+        corner_layout.insertWidget(0, settings_btn)
 
     def create_menu(self):
 
@@ -404,6 +440,11 @@ class MainApp(QMainWindow):
         from utils.logger import cleanup
         cleanup()
         super().closeEvent(event)
+        
+    def toggle_face_recognition(self, checked):
+        enabled = not checked
+        self.camera_widget.face_recognition_enabled = enabled
+        self.camera_widget.detection_manager.set_face_recognition_enabled(enabled)
         
     def show_about_dialog(self):
         QMessageBox.information(
