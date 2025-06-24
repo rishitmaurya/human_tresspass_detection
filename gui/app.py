@@ -12,7 +12,7 @@ from gui.show_faces_dialog import ShowFacesDialog
 from utils.logger import log_lock
 from datetime import datetime
 from PyQt5.QtWidgets import QToolButton
-from PyQt5.QtGui import QIcon, QPixmap
+from PyQt5.QtGui import QIcon, QPixmap, QIcon 
 from gui.alert_dialog import AlertLogDialog
 
 class CustomWebPage(QWebEnginePage):
@@ -30,6 +30,7 @@ class MainApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Human Trespass Detection System")
+        self.setWindowIcon(QIcon(os.path.abspath("assets/zoneeyelogo2.png")))
         self.setMinimumSize(800, 600)
         self.resize(1000, 700)
 
